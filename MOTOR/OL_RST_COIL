@@ -1,0 +1,82 @@
+FUNCTION_BLOCK "OL_RST_COIL 1.2"
+TITLE =Operate a Siemens thermal O/L reset coil
+//Regardless of the reset command duration, this FC energizes the reset coil for 
+//a fixed duration and forces an off delay after that to prevent damage due to 
+//frequent reset requests.
+//
+//v1.2: Created FB .
+//v1.11: 30Nov15 (STP): Added external clock input (bug fix).
+//v1.1: 12Aug15 (STP): Improved interface.
+//v1.0: 12Aug15 (STP): Initial version.
+AUTHOR : STP
+VERSION : 1.2
+
+
+VAR_INPUT
+  Alarm_reset : BOOL ;	//Reset alarm
+  EQ_trip : BOOL ;	//thermal overload trip status 1=OK 0=Alarm
+END_VAR
+VAR_OUTPUT
+  EQ_coil : BOOL ;	//Reset coil output
+  Alarm : BOOL ;	
+END_VAR
+VAR
+  Reset_coil : BOOL ;	
+  T_on : "TON";	
+  T_off : "TON";	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Reset request
+//Energize coil:
+//- Alarm condition still exists
+//- Max coil timer not expired
+//- Reset request
+//- Max off delay timer expired
+      AN    #EQ_trip; 
+      AN    #T_on.Q; 
+      A(    ; 
+      A     #Alarm_reset; 
+      A     #T_off.Q; 
+      O     #Reset_coil; 
+      )     ; 
+      =     #Reset_coil; 
+NETWORK
+TITLE =Off delay
+
+      AN    #Reset_coil; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #T_off (
+           IN                       := L      0.0,
+           PT                       := T#5S);
+
+      NOP   0; 
+NETWORK
+TITLE =Max reset coil time
+
+      A     #Reset_coil; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #T_on (
+           IN                       := L      0.0,
+           PT                       := T#1S);
+
+      NOP   0; 
+NETWORK
+TITLE =Alarm
+
+      AN    #EQ_trip; 
+      =     #Alarm; 
+NETWORK
+TITLE =Energize reset coil
+
+      A     #Reset_coil; 
+      =     #EQ_coil; 
+NETWORK
+TITLE =
+
+      SET   ; 
+      SAVE  ; 
+END_FUNCTION_BLOCK
+
