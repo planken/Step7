@@ -1,0 +1,210 @@
+FUNCTION FC 69 : VOID
+TITLE =Event COUNTER
+
+//The enable input permits the counter to increment on each clock pulse. The 
+//reset input will reset the accumulator and clear the reset. The counter value 
+//may be of type INT/DINT/REAL.
+//
+//v2.2 Created "Count all" v1.2 from regular count function to support more data 
+//types (int/dint/word/dword/time). No other changes.
+//v2.1: Accumulator can be of type INT/DINT/REAL.
+//v1.1: Force ENO on exit.
+//v1.0: Initial.
+AUTHOR : STP
+FAMILY : BATCH
+NAME : DATA
+VERSION : 2.2
+
+
+VAR_INPUT
+  CountEn : BOOL ;	//Enable counting
+  Clock : BOOL ;	//Clock pulse (i.e. 1 Hz or 10 Hz)
+  N : ANY ;	// Increment value
+END_VAR
+VAR_IN_OUT
+  Reset : BOOL ;	//Reset accumulator
+  Accu : ANY ;	//Accumulator
+END_VAR
+VAR_TEMP
+  Out_DB : INT ;	
+  OutType_int : BOOL ;	
+  OutType_word : BOOL ;	
+  OutType_real : BOOL ;	
+  OutType_dint : BOOL ;	
+  OutType_dword : BOOL ;	
+  OutType_time : BOOL ;	
+  N_DB : INT ;	
+  N_type : BYTE ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+//Increment accumulator
+// Type check for N -------------------------
+
+      L     P##N; 
+      LAR2  ; 
+
+      L     W [AR2,P#4.0]; // Obtain DB nbr
+      T     #N_DB; 
+
+      OPN   DB [#N_DB]; // Open DB
+      L     D [AR2,P#6.0]; // Obtain 4-byte value pointer
+      LAR2  ; 
+
+
+// Type check code --------------------------
+
+      L     P##Accu; 
+      LAR1  ; 
+
+      L     B [AR1,P#1.0]; // Check if destination is WORD
+      L     4; 
+      ==I   ; 
+      =     #OutType_word; 
+
+      L     B [AR1,P#1.0]; // Check if destination is INT
+      L     5; 
+      ==I   ; 
+      =     #OutType_int; 
+
+      L     B [AR1,P#1.0]; // Check if destination is DWORD
+      L     6; 
+      ==I   ; 
+      =     #OutType_dword; 
+
+      L     B [AR1,P#1.0]; // Check if destination is INT
+      L     7; 
+      ==I   ; 
+      =     #OutType_dint; 
+
+      L     B [AR1,P#1.0]; // Check if destination is REAL
+      L     8; 
+      ==I   ; 
+      =     #OutType_real; 
+
+      L     B [AR1,P#1.0]; // Check if destination is TIME
+      L     W#16#B; 
+      ==I   ; 
+      =     #OutType_time; 
+
+      L     W [AR1,P#4.0]; // Obtain DB nbr
+      T     #Out_DB; 
+
+      OPN   DB [#Out_DB]; // Open DB
+      L     D [AR1,P#6.0]; // Obtain 4-byte value pointer
+      LAR1  ; 
+
+      A     #OutType_word; // If type is WORD, treat as INT
+      JC    ti; 
+
+      A     #OutType_int; // If type is INT, go there
+      JC    ti; 
+
+      A     #OutType_dword; // If type is DWORD, treat as DINT
+      JC    td; 
+
+      A     #OutType_dint; // If type is DINT, go there
+      JC    td; 
+
+      A     #OutType_real; // If type is REAL, go there
+      JC    tr; 
+
+      A     #OutType_time; // If type is TIME, go there
+      JC    tt; 
+
+      JU    tx; // Skip if neither
+
+// --- Type = int ---
+ti:   A     #CountEn; 
+      A     #Clock; 
+      JCN   ti2; 
+
+      L     W [AR1,P#0.0]; // Increment value
+      L     W [AR2,P#0.0]; // N pointer
+      +I    ; 
+      T     W [AR1,P#0.0]; 
+
+ti2:  O     OV; // Reset on overflow or reset request
+      O     #Reset; 
+      JCN   tx; 
+
+      L     0; // Reset value
+      T     W [AR1,P#0.0]; 
+
+      JU    tx; // Done
+
+// --- Type = dint ---
+td:   A     #CountEn; 
+      A     #Clock; 
+      JCN   td2; 
+
+      L     D [AR1,P#0.0]; // Increment value
+      L     D [AR2,P#0.0]; // N pointer
+      +D    ; 
+      T     D [AR1,P#0.0]; 
+
+td2:  O     OV; // Reset on overflow or reset request
+      O     #Reset; 
+      JCN   tx; 
+
+      L     L#0; // Reset value
+      T     D [AR1,P#0.0]; 
+
+      JU    tx; // Done
+
+// --- Type = real ---
+tr:   A     #CountEn; 
+      A     #Clock; 
+      JCN   tr2; 
+
+      L     D [AR1,P#0.0]; // Increment value
+      L     D [AR2,P#0.0]; // N pointer
+      +R    ; 
+      T     D [AR1,P#0.0]; 
+
+tr2:  O     OV; // Reset on overflow or reset request
+      O     #Reset; 
+      JCN   tx; 
+
+      L     0.000000e+000; // Reset value
+      T     D [AR1,P#0.0]; 
+
+      JU    tx; 
+
+// --- Type = time ---
+tt:   A     #CountEn; 
+      A     #Clock; 
+      JCN   tt2; 
+
+      L     D [AR1,P#0.0]; // Increment value
+      L     D [AR2,P#0.0]; // N pointer
+      +D    ; 
+      T     D [AR1,P#0.0]; 
+
+      JU    tx; 
+
+tt2:  O     OV; // Reset on overflow or reset request
+      O     #Reset; 
+      JCN   tx; 
+
+      L     L#0; // Reset value
+      T     D [AR1,P#0.0]; 
+
+      JU    tx; // Done
+
+tx:   NOP   0; 
+
+// ------------------------------------------
+
+// Clear reset request
+
+      SET   ; 
+      R     #Reset; 
+
+// Force ENO
+      SET   ; 
+      SAVE  ; 
+
+END_FUNCTION
+
