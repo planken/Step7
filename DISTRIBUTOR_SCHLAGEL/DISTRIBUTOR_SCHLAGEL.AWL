@@ -1,0 +1,372 @@
+FUNCTION_BLOCK "DISTR SCHL v1.6P"
+TITLE =Schlagel Distributor Control
+KNOW_HOW_PROTECT
+//This FB is written for a Schlagel distributor v5 with a UCOM + UIO interface or 
+//a v6 with UIO interface. Configure the UIO for digital / binary mode P1, in 
+//which the actual spout position is sent by the UIO as binary unit.
+//
+//Enable the "run" input of the UIO until the actual position matches the desired 
+//position, then release the "run" within 500ms. The distributor will settle on 
+//the position and enable the "confirm" output of the UIO.
+//
+//The UIO's confirm relay will open (off ) if:
+//   (1) The spout is moving to another position.
+//   (2) The spout was obstructed during operation and not allowed to move into 
+//position.
+//   (3) The spout moved after stopping and is no longer in position.
+//   (4) Communication between the EDI control and the UIO module failed.
+//   (5) The EDI control has been powered down or reset.
+//
+//Always monitor the "confirm" status and make sure it is on before allowing 
+//material flow.
+AUTHOR : STP
+VERSION : 1.6
+
+
+VAR_INPUT
+  Bin_SP : INT ;	//Requested bin number
+  Distr_table : BLOCK_DB ;	//Distributor lookup table
+  UIO_posbit_0 : BOOL ;	//UIO-PLC comms
+  UIO_posbit_1 : BOOL ;	//UIO-PLC comms
+  UIO_posbit_2 : BOOL ;	//UIO-PLC comms
+  UIO_posbit_3 : BOOL ;	//UIO-PLC comms
+  UIO_posbit_4 : BOOL ;	//UIO-PLC comms
+  UIO_posbit_5 : BOOL ;	//UIO-PLC comms
+  UIO_confirm : BOOL ;	//UIO-PLC comms
+  Estop_alarm : BOOL ;	//Emergency stop alarm input
+  Distr_man_mode : BOOL ;	//Requested mode 0=auto 1=man
+  Alarm_reset : BOOL ;	//Clear alarms
+END_VAR
+VAR_OUTPUT
+  UIO_run : BOOL ;	//UIO-PLC comms
+  Motor_running : BOOL ;	//Indicates distributor is moving
+END_VAR
+VAR_IN_OUT
+  Actual_bin : INT ;	//Actual bin
+  Actual_spout : INT ;	//Actual spout
+  Infeed_OK : BOOL ;	//Position achived, OK to run equipment
+  Alarm_general : BOOL ;	//Alam: combined flag
+  Alarm_SP_invalid : BOOL ;	//Alarm: requested bin invalid
+  Alarm_timeout : BOOL ;	//Alarm: posiioning timeout
+  Alarm_confirm : BOOL ;	//Alarm: confirmation alarm
+END_VAR
+VAR
+  Spout_SP_last : INT ;	//Previous requested bin number
+  Spout_SP : INT ;	//Requetsed spout number
+  Actual_bin_temp : INT ;	//Actual bin nbr before CONF signal
+  CFG_spouts : DINT ;	//Number of spouts - USER MUST WRITE
+  CFG_spout_time : TIME  := T#10S;	//Max time per spout - USER MUST WRITE
+  Timeout : TIME ;	//Timeout alarm
+  New_pos : BOOL ;	//New position requested
+  Run_request : BOOL ;	//Send run request
+  Bin_SP_0 : BOOL ;	//Bin setpoint is 0
+  Spout_SP_0 : BOOL ;	//Spout setpoint is 0
+  Position_valid : BOOL ;	//Position is valid
+  Run_timer : "TON";	
+  Confirm_timer : "TON";	
+END_VAR
+VAR_TEMP
+  LoopCount : INT ;	//Internal coounter
+END_VAR
+BEGIN
+NETWORK
+TITLE =Comments
+//v 1.5 - (22Aug16) Improvements:
+// - Incorporated the bin/spout x-ref code. 
+// - When looking up a bin for a spout nbr, we keep iterating the table until 
+//   we find an entry where both the spout and bin nbr match. This in case one    
+//   spout refers to multiple bins (with use of a diverter, for example).
+// - Only return actual bin after having received CONF from EDI.
+// - Greatly simplified #New_pos logic (renamed from #New_bin).
+// - Store current spout setpoint as previous setpoint only at #Infeed_OK.
+// - Only signal #Infeed_OK without alarms and valid setpoints to prevent rare 
+//   situations where #Infeed_OK could become true with an active alarm.
+// - Start timeout timer only with valid bin SP (pointless otherwise).
+//v 1.4 - Improvements:
+// - Changed distributor lookup table input from INT to BLOCK_DB.
+//v 1.3 - Improvements:
+// - Instead of allowing a run request as soon as the actual spout 
+//   mismatches thee requested spout, we now detect changes in setpoints. This 
+//   should prevent an inadvertent run to be issued should the Schlagel be pushed 
+//   out of alignment. (A run request will always move the distributor.)
+
+
+NETWORK
+TITLE =Distributor bin-to-spout
+//This function accepts a bin number and translates this into the corresponding 
+//desired spout position on the distributor. One spout can be associated with 
+//multiple bins in the lookup table.
+//21Apr16: (STP) Added in v1.5.
+      L     0; // Clear spout nbr for bin setpoint
+      T     #Spout_SP; 
+
+      OPN   #Distr_table; 
+      LAR1  P#0.0; // DB start address in AR1
+
+      L     62; // Max iterations
+BS1:  T     #LoopCount; 
+
+      L     DBW [AR1,P#0.0]; // [ Quit lookup if bin/spout value < 0
+      L     0; // [
+      <I    ; // [
+      JC    BSX; // [
+
+      L     #Bin_SP; // [ Matching bin# found, return spout#
+      L     DBW [AR1,P#0.0]; // [
+      ==I   ; // [
+      JCN   BS2; // [ 
+      L     DBW [AR1,P#2.0]; // [
+      T     #Spout_SP; // [
+      JU    BSX; // [
+
+BS2:  +AR1  P#4.0; // [ Advance to next value pair in lookup DB
+      L     #LoopCount; // [
+      LOOP  BS1; // [
+
+BSX:  NOP   0; 
+NETWORK
+TITLE =Indicate bin setpoint is 0
+//22Aug16: Added with v1.5.
+      L     #Bin_SP; 
+      L     0; 
+      ==I   ; 
+      =     #Bin_SP_0; 
+NETWORK
+TITLE =Indicate spout setpoint is 0
+//22Aug16: Added with v1.5.
+      L     #Spout_SP; 
+      L     0; 
+      ==I   ; 
+      =     #Spout_SP_0; 
+NETWORK
+TITLE =Read position from distributor
+//The UIO functions in Digital/Binary mode (its output relays indicate the actual 
+//spout in binary). Here we transpose the UIO outputs to the MSB of the 16-bit 
+//spout word. We clear the position word first to ensure we read fresh data from 
+//the UIO.
+//
+//Note: the spout position as returned by the EDI reflects the nearest spout. 
+//Only with the confirm signal returned can we consider this positioned for the 
+//requested spout.
+      L     0; // Clear the spout buffer MSB+LSB
+      T     #Actual_spout; 
+
+      LAR1  P##Actual_spout; // Load buffer address in AR1
+
+      A     #UIO_posbit_0; // Copy position bit 0 to MSB 1.0
+      =     DIX [AR1,P#1.0]; 
+
+      A     #UIO_posbit_1; // Copy position bit 1 to MSB 1.1
+      =     DIX [AR1,P#1.1]; 
+
+      A     #UIO_posbit_2; // Copy position bit 2 to MSB 1.2
+      =     DIX [AR1,P#1.2]; 
+
+      A     #UIO_posbit_3; // Copy position bit 3 to MSB 1.3
+      =     DIX [AR1,P#1.3]; 
+
+      A     #UIO_posbit_4; // Copy position bit 4 to MSB 1.4
+      =     DIX [AR1,P#1.4]; 
+
+      A     #UIO_posbit_5; // Copy position bit 5 to MSB 1.5
+      =     DIX [AR1,P#1.5]; 
+
+NETWORK
+TITLE =Distributor spout-to-bin
+//This function accepts a spout number and returns a bin number that matches the 
+//actual spout number and requested bin number. One spout can be associated with 
+//multiple bins in the lookup table.
+//21Apr16: (STP) Added in v1.5.
+      L     0; 
+      T     #Actual_bin; 
+
+      OPN   #Distr_table; 
+      LAR1  P#0.0; // DB start address in AR1
+
+      L     62; // Max iterations
+SB1:  T     #LoopCount; 
+
+      L     DBW [AR1,P#2.0]; // [ Quit lookup if bin/spout value < 0
+      L     0; // [
+      <I    ; // [
+      JC    SBX; // [
+
+      A(    ; 
+      L     #Actual_spout; // [ Matching spout# and bin# found, return bin#
+      L     DBW [AR1,P#2.0]; // [
+      ==I   ; // [
+      )     ; // [
+      A(    ; // [
+      L     #Bin_SP; // [
+      L     DBW [AR1,P#0.0]; // [
+      ==I   ; // [
+      )     ; // [
+      JCN   SB2; // [ 
+      L     DBW [AR1,P#0.0]; // [
+      T     #Actual_bin_temp; // [ ..store actual bin temporarily
+      JU    SBX; // [
+
+SB2:  +AR1  P#4.0; // [ Advance to next value pair in lookup DB
+      L     #LoopCount; // [
+      LOOP  SB1; // [
+
+SBX:  NOP   0; 
+NETWORK
+TITLE =Signal new bin selection
+//Request a new position:
+//
+//- Valid non-zero position requested
+//- Requested spout differs from last set point
+//- We are not already on the requested spout
+//
+//03Jul15: (STP) Added in v1.3.
+//22Aug16: (STP) v1.5: Simplified.
+      AN    #Bin_SP_0; 
+      AN    #Spout_SP_0; 
+      A(    ; 
+      L     #Spout_SP; 
+      L     #Spout_SP_last; 
+      <>I   ; 
+      )     ; 
+      A(    ; 
+      L     #Actual_spout; 
+      L     #Spout_SP; 
+      <>I   ; 
+      )     ; 
+      =     #New_pos; 
+NETWORK
+TITLE =Once positioned, store last requested spout
+
+      A     #Infeed_OK; 
+      JNB   _001; 
+      L     #Actual_spout; 
+      T     #Spout_SP_last; 
+_001: NOP   0; 
+NETWORK
+TITLE =Send EDI run request
+//Request a new position via the UIO:
+//
+//- No active emergency stop alarm.
+//- No alarm.
+//- Not operating in manual mode (perform bin selection at remote EDI 
+//controller).
+//- New position is requested.
+//
+//03Jul15: (STP): Changed with v1.3.
+      AN    #Estop_alarm; 
+      AN    #Alarm_general; 
+      AN    #Distr_man_mode; 
+      A     #New_pos; 
+      =     #Run_request; 
+      =     #UIO_run; 
+      =     #Motor_running; 
+NETWORK
+TITLE =Only return actual bin once confirmed
+
+      AN    #Run_request; 
+      A     #UIO_confirm; 
+      JNB   _002; 
+      L     #Actual_bin_temp; 
+      T     #Actual_bin; 
+_002: NOP   0; 
+NETWORK
+TITLE =Signal OK to run
+//It is OK to run equipment if:
+//- No active fault
+//- Requested position is valid (not "no bin").
+//- Distributor is at requested position.
+//- There is no active run request.
+//- Distributor is confirming position.
+      AN    #Alarm_general; 
+      AN    #Bin_SP_0; 
+      A(    ; 
+      L     #Spout_SP; 
+      L     #Actual_spout; 
+      ==I   ; 
+      )     ; 
+      AN    #Run_request; 
+      A     #UIO_confirm; 
+      =     #Infeed_OK; 
+NETWORK
+TITLE =Alarm: timeout - Calculate maximum seek time
+//Multiply the number of spouts and time per spout. We could have used a single 
+//time tag but this opens the door to monitor spout movement changes for early 
+//detection of problems (such as a powered down EDI).
+      L     #CFG_spout_time; 
+      L     #CFG_spouts; 
+      *D    ; 
+      T     #Timeout; 
+      NOP   0; 
+NETWORK
+TITLE =Alarm: timeout - Start seek timer
+//If a run request is being sent or if a spout mismatch occurs for a fixed amount 
+//of time we alert the operator. The timeout value depends on the number of 
+//spouts.
+      A(    ; 
+      O     #Run_request; 
+      O     ; 
+      AN    #Alarm_SP_invalid; 
+      AN    #Bin_SP_0; 
+      A(    ; 
+      L     #Spout_SP; 
+      L     #Actual_spout; 
+      <>I   ; 
+      )     ; 
+      )     ; 
+      AN    #Alarm_reset; 
+      =     L      2.0; 
+      BLD   103; 
+      CALL #Run_timer (
+           IN                       := L      2.0,
+           PT                       := #Timeout);
+
+      NOP   0; 
+NETWORK
+TITLE =Alarm: timeout - Signal seek timeout alarm
+
+      A     #Run_timer.Q; 
+      S     #Alarm_timeout; 
+NETWORK
+TITLE =Alarm: confirmation timeout - Start timer
+//If we fail to receive a confirmation from the UIO this could indicate a problem 
+//with the hardware, alert the operator.
+      AN    #UIO_confirm; 
+      AN    #Alarm_reset; 
+      =     L      2.0; 
+      BLD   103; 
+      CALL #Confirm_timer (
+           IN                       := L      2.0,
+           PT                       := #Timeout);
+
+      NOP   0; 
+NETWORK
+TITLE =Alarm: confirmation timeout - Signal confirmation timeout alarm
+//03Jul15: (STP) Made the confirmation timeout alarm self-clearing. Otherwise the 
+//fault will not make sense to an operator, unless we use that as a prerequisite 
+//to determine position OK.
+      A     #Confirm_timer.Q; 
+      =     #Alarm_confirm; 
+NETWORK
+TITLE =Alarm: Spout number not found for given bin number
+//If we are requesting a valid bin number but the lookup table returned an 
+//invalid spout number we alert the operator. It is assumed that setpoint 
+//boundary checks are performed elsewhere as well.
+      AN    #Bin_SP_0; 
+      A     #Spout_SP_0; 
+      S     #Alarm_SP_invalid; 
+NETWORK
+TITLE =Alarm: signal general alarm (for use in HMI screens)
+
+      O     #Alarm_timeout; 
+      O     #Alarm_confirm; 
+      O     #Alarm_SP_invalid; 
+      =     #Alarm_general; 
+NETWORK
+TITLE =Reset alarms
+
+      A     #Alarm_reset; 
+      R     #Alarm_timeout; 
+      R     #Alarm_confirm; 
+      R     #Alarm_SP_invalid; 
+END_FUNCTION_BLOCK
+
