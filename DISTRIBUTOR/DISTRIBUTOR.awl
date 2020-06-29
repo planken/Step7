@@ -1,4 +1,4 @@
-FUNCTION_BLOCK "DISTR 2.43"
+FUNCTION_BLOCK FB 57
 TITLE =Distributor control FM350-1
 //Distributor control for Hi-Pro Olds for use with S7 FM350-1 counter and 
 //Simatic counter control function.
@@ -103,13 +103,13 @@ VAR
    Rev : ARRAY  [1 .. 3 ] OF //Array of count values
    INT ;	
   END_STRUCT ;	
-  T_M : "TON";	//Motor contactor response timer
-  T_Pos : "TON";	//Positioning timer
-  T_PosAchd : "TON";	//Position achieved delay
-  T_Coast_stop : "TON";	//Motor coast stop timer
-  T_Jog : "TON";	//Auto mode jog required to align spout
-  T_JogFwd : "TON";	//Manual mode jog for forward motion
-  T_JogRev : "TON";	//Manual mode jog for reverse motion
+  T_M : SFB 4;	//Motor contactor response timer
+  T_Pos : SFB 4;	//Positioning timer
+  T_PosAchd : SFB 4;	//Position achieved delay
+  T_Coast_stop : SFB 4;	//Motor coast stop timer
+  T_Jog : SFB 4;	//Auto mode jog required to align spout
+  T_JogFwd : SFB 4;	//Manual mode jog for forward motion
+  T_JogRev : SFB 4;	//Manual mode jog for reverse motion
 END_VAR
 VAR_TEMP
   LoopCount : INT ;	
@@ -118,6 +118,20 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Comments
+//v2.44: - No changes to instance data, new FB is drop-in replacement.
+//       - Error value sign did not always properly indicate direction needed
+//         if error exceeded 180 degrees. Correction was always done in
+//         fwd/rev determination. Corrected & simplified.
+//       - Do not run timeout timer without bin (Bin_T_0 = TRUE).
+//       - Prior, no seek home executed with SP=0. Seek home was never executed
+//         on first scan.
+//       - Without MoveEnable the auto forward request will not become TRUE.
+//         Note that this is also checked in the contactor logic.
+//       - Write Bin_GT_0 before executing the bin lookup to avoid looking up 
+//         encoder counts for bin=0.
+//       - No "position achieved" without valid bin > 0. This is a significant
+//         deviation from previous versions but this allows the PLC program to
+//         stop any infeed equipment.
 //v2.43: - Rearranged the interface, grouping booleans.
 //       - Do not run timeout timer if MoveEnable false or Manual is true.
 //       - Added manual control option.
@@ -264,11 +278,23 @@ NETWORK
 TITLE =Seek home - clear with no bin
 //If we have no valid setpoint (SP = 0) we do not want to seek home. Except 
 //during a forced calibration cycle.
-      AN    #Exec_home_cal; 
-      A     #SeekHome; 
-      A     #BinSP_Valid; 
-      AN    #Bin_GT_0; 
-      R     #SeekHome; 
+//
+//03Feb16: (STP) v2.44: Disabled this. Otherwise: if we have SP=0 and a PLC 
+//restart, the seek home will never execute on first scan. Old code:
+//     //      AN    #Exec_home_cal
+//     //      A     #SeekHome
+//     //      A     #BinSP_Valid
+//     //      AN    #Bin_GT_0
+//     //      R     #SeekHome
+NETWORK
+TITLE =Indicate we have a valid bin > 0
+//Used in various networks.
+//
+//03Feb16: (STP) v2.44: Execute this prior to the bin lookup, not after.
+      L     #Equip_SP; 
+      L     0; 
+      >I    ; 
+      =     #Bin_GT_0; 
 NETWORK
 TITLE =New bin - new setpoint detection
 //When we detect a change in setpoint, we may execute the bin lookup.
@@ -354,13 +380,6 @@ L2:   L     #Equip_SP;
 L3:   NOP   0; 
 
 NETWORK
-TITLE =Indicate we have a valid bin > 0
-//Used in various networks.
-      L     #Equip_SP; 
-      L     0; 
-      >I    ; 
-      =     #Bin_GT_0; 
-NETWORK
 TITLE =Indicate motor running
 //Indicate to WinCC that the motor is running forward or reverse.
 //
@@ -408,10 +427,12 @@ TITLE =Positioning timeout - Monitor positioning time
 //seek cycle in case we fail to detect the home pulse.
 //15Jan16: (STP) Version 2.4 - Don't run timer during HomeIndexFault.
 //21Jan16: (STP) v.243 - Do not run timer if MoveEnable false or Manual is true.
+//03Feb16: (STP) v2.44 - Do not run timer without bin (Bin_T_0 = TRUE).
       A(    ; 
       AN    #PositionAchieved; 
       AN    #SeekHome; 
       A     #BinSP_Valid; 
+      A     #Bin_GT_0; 
       O     #SeekHome; 
       )     ; 
       AN    #PositioningFault; 
@@ -914,7 +935,12 @@ TITLE =Indicate preliminary position achieved
 //
 //While selecting "no bin" the target is not reloaded thus the current position 
 //remains "achieved".
+//
+//03Feb16: (STP) v2.44: Deviation from previous protocol. Without a valid bin the 
+//position achieved status becomes FALSE so the PLC program can prevent infeed 
+//equipment.
       A     #BinSP_Valid; 
+      A     #Bin_GT_0; 
       AN    #SeekHome; 
       A(    ; 
       A(    ; 
@@ -1137,12 +1163,55 @@ TITLE =Seal preact range occurence
       )     ; 
       =     #AtPreactPulse; 
 NETWORK
-TITLE =Position error and direction
-//The signed error determines the correction needed to achieve target position.
-      L     #PosTgt; 
+TITLE =Calculate position error and direction
+//The signed error is the difference between the current position and the desired 
+//position. The error determines the correction needed to achieve target 
+//position.
+//Should the error exceed 180 degrees we correct the rotation needed.
+//
+//Negative error values: short of target, requires CW movement.
+//Positive error values: exceeded target, requires CCW movement.
+//
+//03Feb16: (STP) v2.44: Calculate error and correct for rollover and rotation. 
+//The sign indicates rotation required to achieve target. So neg values require 
+//CW rotation and pos values require CCW rotation to achieve target.
       L     #Count_actual; 
+      L     #PosTgt; 
       -I    ; 
       T     #TgtError_Signed; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      =     L      4.0; 
+      A     L      4.0; 
+      A(    ; 
+      L     #TgtError_Signed; 
+      L     -1269; 
+      <I    ; 
+      )     ; 
+      JNB   _020; 
+      L     #TgtError_Signed; 
+      L     2540; 
+      +I    ; 
+      T     #TgtError_Signed; 
+_020: NOP   0; 
+      A     L      4.0; 
+      A(    ; 
+      L     #TgtError_Signed; 
+      L     1269; 
+      >I    ; 
+      )     ; 
+      JNB   _021; 
+      L     #TgtError_Signed; 
+      L     2540; 
+      -I    ; 
+      T     #TgtError_Signed; 
+_021: NOP   0; 
+NETWORK
+TITLE =Calculate absolute error
+//The signed error determines the correction needed to achieve target position.
+      L     #TgtError_Signed; 
       ITD   ; 
       DTR   ; 
       ABS   ; 
@@ -1198,7 +1267,7 @@ TITLE =Calculate actual preact count
       =     L      4.0; 
       A     L      4.0; 
       A     #GoReverse; 
-      JNB   _020; 
+      JNB   _022; 
       L     #PreactOffCount; 
       L     #Count_actual; 
       -I    ; 
@@ -1206,11 +1275,11 @@ TITLE =Calculate actual preact count
       AN    OV; 
       SAVE  ; 
       CLR   ; 
-_020: A     BR; 
+_022: A     BR; 
       S     #CoastPulse; 
       A     L      4.0; 
       A     #GoForward; 
-      JNB   _021; 
+      JNB   _023; 
       L     #Count_actual; 
       L     #PreactOffCount; 
       -I    ; 
@@ -1218,73 +1287,43 @@ _020: A     BR;
       AN    OV; 
       SAVE  ; 
       CLR   ; 
-_021: A     BR; 
+_023: A     BR; 
       S     #CoastPulse; 
 NETWORK
 TITLE =Check if shortest path is clockwise
-
-      A(    ; 
+//03Feb16: (STP) v2.44: Can now use error to determine rotation needed.
+      O(    ; 
       L     #TgtError_Signed; 
       L     0; 
       <I    ; 
-      )     ; 
-      A(    ; 
-      L     #TgtError_Abs; 
-      L     1269; 
-      >I    ; 
-      )     ; 
-      O     ; 
-      A(    ; 
-      L     #TgtError_Signed; 
-      L     0; 
-      >I    ; 
-      )     ; 
-      A(    ; 
-      L     #TgtError_Abs; 
-      L     1269; 
-      <=I   ; 
       )     ; 
       O     #SeekHome; 
       =     #GoForward; 
 NETWORK
 TITLE =Check if shortest path is counter-clockwise
-
-      A(    ; 
-      A(    ; 
-      L     #TgtError_Signed; 
-      L     0; 
-      <I    ; 
-      )     ; 
-      A(    ; 
-      L     #TgtError_Abs; 
-      L     1269; 
-      <I    ; 
-      )     ; 
-      O     ; 
+//03Feb16: (STP) v2.44: Can now use error to determine rotation needed.
       A(    ; 
       L     #TgtError_Signed; 
       L     0; 
       >I    ; 
-      )     ; 
-      A(    ; 
-      L     #TgtError_Abs; 
-      L     1269; 
-      >I    ; 
-      )     ; 
       )     ; 
       AN    #SeekHome; 
       =     #GoReverse; 
 NETWORK
 TITLE =Auto control - energize forward contactor
 //Select if forward direction is required.
+//
+//03Feb16: (STP) v2.44: Moved MoveEnable outside the SeekHome bypass contact as 
+//we do not want to move without it explicitly enabled. Note that this was also 
+//checked in the contactor logic.
       AN    #EmergencyStop; 
       AN    #Manual; 
       AN    #PosAchd_Tmp; 
       A(    ; 
-      A     #Bin_GT_0; 
-      A     #MoveEnable; 
+      O     #Bin_GT_0; 
       O     #SeekHome; 
       )     ; 
+      A     #MoveEnable; 
       A     #GoForward; 
       A(    ; 
       O     #JogRqd; 
@@ -1414,3 +1453,4 @@ TITLE =Energize reverse contactor
       A     #MoveEnable; 
       =     #MotorRunRev; 
 END_FUNCTION_BLOCK
+
