@@ -1,0 +1,1 @@
+This FB is written for a Schlagel distributor v5 with a UCOM + UIO interface or a v6/v7 with UIO interface. Configure the UIO for digital / binary mode P1, in which the actual spout position is sent by the UIO as binary unit.
