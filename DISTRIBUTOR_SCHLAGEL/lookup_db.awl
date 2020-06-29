@@ -1,0 +1,260 @@
+DATA_BLOCK DB 900
+TITLE =Distributor lookup table
+AUTHOR : splanken
+VERSION : 1.0
+READ_ONLY
+
+
+  STRUCT 	
+   Equip_1 : INT  := 2211;	//*
+   Count_1 : INT  := 1;	
+   Equip_2 : INT  := 2212;	//*
+   Count_2 : INT  := 2;	
+   Equip_3 : INT  := 2215;	//*
+   Count_3 : INT  := 3;	
+   Equip_4 : INT  := 2216;	//*
+   Count_4 : INT  := 4;	
+   Equip_5 : INT ;	//* Blank
+   Count_5 : INT  := 5;	
+   Equip_6 : INT  := 2225;	//*
+   Count_6 : INT  := 6;	
+   Equip_7 : INT  := 2220;	//*
+   Count_7 : INT  := 7;	
+   Equip_8 : INT  := 2320;	//*
+   Count_8 : INT  := 8;	
+   Equip_9 : INT  := 2219;	//*
+   Count_9 : INT  := 9;	
+   Equip_10 : INT  := 2224;	//*
+   Count_10 : INT  := 10;	
+   Equip_11 : INT  := 2223;	//*
+   Count_11 : INT  := 11;	
+   Equip_12 : INT  := 2222;	//*
+   Count_12 : INT  := 12;	
+   Equip_13 : INT  := 2218;	//*
+   Count_13 : INT  := 13;	
+   Equip_14 : INT  := 2221;	//*
+   Count_14 : INT  := 14;	
+   Equip_15 : INT  := 2217;	//*
+   Count_15 : INT  := 15;	
+   Equip_16 : INT  := 2213;	//*
+   Count_16 : INT  := 16;	
+   Equip_17 : INT  := 2209;	//*
+   Count_17 : INT  := 17;	
+   Equip_18 : INT  := 2214;	//*
+   Count_18 : INT  := 18;	
+   Equip_19 : INT  := 2210;	//*
+   Count_19 : INT  := 19;	
+   Equip_20 : INT ;	//* Blank
+   Count_20 : INT  := 20;	
+   Equip_21 : INT  := -1;	//* Negative value = end of list, early termination
+   Count_21 : INT  := -1;	
+   Equip_22 : INT ;	//*
+   Count_22 : INT ;	
+   Equip_23 : INT ;	//*
+   Count_23 : INT ;	
+   Equip_24 : INT ;	//*
+   Count_24 : INT ;	
+   Equip_25 : INT ;	//*
+   Count_25 : INT ;	
+   Equip_26 : INT ;	//*
+   Count_26 : INT ;	
+   Equip_27 : INT ;	//*
+   Count_27 : INT ;	
+   Equip_28 : INT ;	//*
+   Count_28 : INT ;	
+   Equip_29 : INT ;	//*
+   Count_29 : INT ;	
+   Equip_30 : INT ;	//*
+   Count_30 : INT ;	
+   Equip_31 : INT ;	//*
+   Count_31 : INT ;	
+   Equip_32 : INT ;	//*
+   Count_32 : INT ;	
+   Equip_33 : INT ;	//*
+   Count_33 : INT ;	
+   Equip_34 : INT ;	//*
+   Count_34 : INT ;	
+   Equip_35 : INT ;	//*
+   Count_35 : INT ;	
+   Equip_36 : INT ;	//*
+   Count_36 : INT ;	
+   Equip_37 : INT ;	//*
+   Count_37 : INT ;	
+   Equip_38 : INT ;	//*
+   Count_38 : INT ;	
+   Equip_39 : INT ;	//*
+   Count_39 : INT ;	
+   Equip_40 : INT ;	//*
+   Count_40 : INT ;	
+   Equip_41 : INT ;	//*
+   Count_41 : INT ;	
+   Equip_42 : INT ;	//*
+   Count_42 : INT ;	
+   Equip_43 : INT ;	//*
+   Count_43 : INT ;	
+   Equip_44 : INT ;	//*
+   Count_44 : INT ;	
+   Equip_45 : INT ;	//*
+   Count_45 : INT ;	
+   Equip_46 : INT ;	//*
+   Count_46 : INT ;	
+   Equip_47 : INT ;	//*
+   Count_47 : INT ;	
+   Equip_48 : INT ;	//*
+   Count_48 : INT ;	
+   Equip_49 : INT ;	//*
+   Count_49 : INT ;	
+   Equip_50 : INT ;	//*
+   Count_50 : INT ;	
+   Equip_51 : INT ;	//*
+   Count_51 : INT ;	
+   Equip_52 : INT ;	//*
+   Count_52 : INT ;	
+   Equip_53 : INT ;	//*
+   Count_53 : INT ;	
+   Equip_54 : INT ;	//*
+   Count_54 : INT ;	
+   Equip_55 : INT ;	//*
+   Count_55 : INT ;	
+   Equip_56 : INT ;	//*
+   Count_56 : INT ;	
+   Equip_57 : INT ;	//*
+   Count_57 : INT ;	
+   Equip_58 : INT ;	//*
+   Count_58 : INT ;	
+   Equip_59 : INT ;	//*
+   Count_59 : INT ;	
+   Equip_60 : INT ;	//*
+   Count_60 : INT ;	
+   Equip_61 : INT ;	//*
+   Count_61 : INT ;	
+   Equip_62 : INT ;	//*
+   Count_62 : INT ;	
+  END_STRUCT ;	
+BEGIN
+   Equip_1 := 2211; 
+   Count_1 := 1; 
+   Equip_2 := 2212; 
+   Count_2 := 2; 
+   Equip_3 := 2215; 
+   Count_3 := 3; 
+   Equip_4 := 2216; 
+   Count_4 := 4; 
+   Equip_5 := 0; 
+   Count_5 := 5; 
+   Equip_6 := 2225; 
+   Count_6 := 6; 
+   Equip_7 := 2220; 
+   Count_7 := 7; 
+   Equip_8 := 2320; 
+   Count_8 := 8; 
+   Equip_9 := 2219; 
+   Count_9 := 9; 
+   Equip_10 := 2224; 
+   Count_10 := 10; 
+   Equip_11 := 2223; 
+   Count_11 := 11; 
+   Equip_12 := 2222; 
+   Count_12 := 12; 
+   Equip_13 := 2218; 
+   Count_13 := 13; 
+   Equip_14 := 2221; 
+   Count_14 := 14; 
+   Equip_15 := 2217; 
+   Count_15 := 15; 
+   Equip_16 := 2213; 
+   Count_16 := 16; 
+   Equip_17 := 2209; 
+   Count_17 := 17; 
+   Equip_18 := 2214; 
+   Count_18 := 18; 
+   Equip_19 := 2210; 
+   Count_19 := 19; 
+   Equip_20 := 0; 
+   Count_20 := 20; 
+   Equip_21 := -1; 
+   Count_21 := -1; 
+   Equip_22 := 0; 
+   Count_22 := 0; 
+   Equip_23 := 0; 
+   Count_23 := 0; 
+   Equip_24 := 0; 
+   Count_24 := 0; 
+   Equip_25 := 0; 
+   Count_25 := 0; 
+   Equip_26 := 0; 
+   Count_26 := 0; 
+   Equip_27 := 0; 
+   Count_27 := 0; 
+   Equip_28 := 0; 
+   Count_28 := 0; 
+   Equip_29 := 0; 
+   Count_29 := 0; 
+   Equip_30 := 0; 
+   Count_30 := 0; 
+   Equip_31 := 0; 
+   Count_31 := 0; 
+   Equip_32 := 0; 
+   Count_32 := 0; 
+   Equip_33 := 0; 
+   Count_33 := 0; 
+   Equip_34 := 0; 
+   Count_34 := 0; 
+   Equip_35 := 0; 
+   Count_35 := 0; 
+   Equip_36 := 0; 
+   Count_36 := 0; 
+   Equip_37 := 0; 
+   Count_37 := 0; 
+   Equip_38 := 0; 
+   Count_38 := 0; 
+   Equip_39 := 0; 
+   Count_39 := 0; 
+   Equip_40 := 0; 
+   Count_40 := 0; 
+   Equip_41 := 0; 
+   Count_41 := 0; 
+   Equip_42 := 0; 
+   Count_42 := 0; 
+   Equip_43 := 0; 
+   Count_43 := 0; 
+   Equip_44 := 0; 
+   Count_44 := 0; 
+   Equip_45 := 0; 
+   Count_45 := 0; 
+   Equip_46 := 0; 
+   Count_46 := 0; 
+   Equip_47 := 0; 
+   Count_47 := 0; 
+   Equip_48 := 0; 
+   Count_48 := 0; 
+   Equip_49 := 0; 
+   Count_49 := 0; 
+   Equip_50 := 0; 
+   Count_50 := 0; 
+   Equip_51 := 0; 
+   Count_51 := 0; 
+   Equip_52 := 0; 
+   Count_52 := 0; 
+   Equip_53 := 0; 
+   Count_53 := 0; 
+   Equip_54 := 0; 
+   Count_54 := 0; 
+   Equip_55 := 0; 
+   Count_55 := 0; 
+   Equip_56 := 0; 
+   Count_56 := 0; 
+   Equip_57 := 0; 
+   Count_57 := 0; 
+   Equip_58 := 0; 
+   Count_58 := 0; 
+   Equip_59 := 0; 
+   Count_59 := 0; 
+   Equip_60 := 0; 
+   Count_60 := 0; 
+   Equip_61 := 0; 
+   Count_61 := 0; 
+   Equip_62 := 0; 
+   Count_62 := 0; 
+END_DATA_BLOCK
+
