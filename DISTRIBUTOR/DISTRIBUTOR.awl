@@ -1,11 +1,11 @@
-FUNCTION_BLOCK "DISTR 2.46"
+FUNCTION_BLOCK "DISTR 2.5"
 TITLE =Distributor control FM350-1
 //Distributor control for Hi-Pro Olds for use with S7 FM350-1 counter and 
 //Simatic counter control function.
 AUTHOR : STP
 FAMILY : Motor
 NAME : Distr
-VERSION : 2.4
+VERSION : 2.5
 
 
 VAR_INPUT
@@ -17,6 +17,7 @@ VAR_INPUT
   MotorStatusFwd : BOOL ;	//Contactor status for FORWARD
   MotorStatusRev : BOOL ;	//Contactor status for REVERSE
   FaultReset : BOOL ;	//Clear alarms
+  FM_STS_SET : BOOL ;	//FM counter STST_SET input (encoder Z)
   FM_count : INT ;	//Current encoder value
   Equip_SP : INT ;	//Requested equipment number to position to
 END_VAR
@@ -28,10 +29,10 @@ VAR_OUTPUT
   MotorRunRev : BOOL ;	//Energize reverse contactor coil
 END_VAR
 VAR_IN_OUT
-  ManualRunFwd : BOOL ;	
-  ManualJogFwd : BOOL ;	
-  ManualRunRev : BOOL ;	
-  ManualJogRev : BOOL ;	
+  ManualRunFwd : BOOL ;	//Manual run forward command
+  ManualJogFwd : BOOL ;	//Manual jog forward command
+  ManualRunRev : BOOL ;	//Manual run reverse command
+  ManualJogRev : BOOL ;	//Manual jog reverse command
   Count_actual : INT ;	//Biased counter value
   MotorStartFault : BOOL ;	//Contactor could not energize in allotted time
   PositioningFault : BOOL ;	//Positioning timed out
@@ -47,6 +48,7 @@ VAR
    SeekHome_req : BOOL ;	//Seek home request *future*
    Cal_req : BOOL ;	//Calibration request *future*
    Cal_busy : BOOL ;	//Calibration is in progress *future*
+   Init_busy : BOOL ;	//Running initialization
    HomeCountFwd : INT ;	//Encoder count where home pulse is expected for forward movement
    HomeCountRev : INT ;	//Encoder count where home pulse is expected for reverse movement
    Deadband_Searching : INT  := 10;	//Deadband while searching (try to keep as low as possible)
@@ -75,9 +77,11 @@ VAR
   Exec_home_cal_OS : BOOL ;	//Calibraion one-shot
   Fault_reset_2 : BOOL ;	//Combined fault reset (user & at start of cal)
   PosAchd_internal : BOOL ;	//Position achieved (does not necessarily match user setpoint)
-  IndexRangeCW : BOOL ;	
-  IndexRangeCCW : BOOL ;	
-  OK_to_start : BOOL ;	
+  IndexRangeCW : BOOL ;	//Encoder in CW index range
+  IndexRangeCCW : BOOL ;	//Encoder in CCW index range
+  OK_to_start : BOOL ;	//Motor OK to start
+  Exec_init : BOOL ;	//Execute initalization run to detect encoder Z pulse
+  Exec_pls : BOOL ;	//***Not used***
   Count_bias : INT ;	//Bias to be applied to raw count value from counter
   Target : INT ;	//Encoder count of reqd bin from lookup table
   TargetError : INT ;	//Signed count difference to target
@@ -86,10 +90,10 @@ VAR
   Intern_SP_prev : INT ;	//Previous equipment number requested
   PreAct : INT  := 47;	//Preact value, corrected
   Deadband : INT ;	//Actual deadband used
-  IndexErrorCW : INT ;	
-  IndexErrorCW_abs : INT ;	
-  IndexErrorCCW : INT ;	
-  IndexErrorCCW_abs : INT ;	
+  IndexErrorCW : INT ;	//Error to CW index
+  IndexErrorCW_abs : INT ;	//Error to CW index (absolute)
+  IndexErrorCCW : INT ;	//Error to CCW index
+  IndexErrorCCW_abs : INT ;	//Error to CCW index (absolute)
   LastIndex : STRUCT 	//Last recorded index counts (evaluation only)
    Fwd : ARRAY  [1 .. 3 ] OF //Array of count values
    INT ;	
@@ -103,6 +107,8 @@ VAR
   T_Jog : "TON";	//Auto mode jog required to align spout
   T_JogFwd : "TON";	//Manual mode jog for forward motion
   T_JogRev : "TON";	//Manual mode jog for reverse motion
+  T_Init_dly : "TON";	//Init cycle minimum run time
+  T_Init_TO : "TON";	//Init cycle timeout
 END_VAR
 VAR_TEMP
   LoopCount : INT ;	
@@ -112,6 +118,16 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Comments
+//v2.5:  - THIS IS A CRITICAL BUG FIX.
+//         At power up the FM counter value is zeroed. By rotating until the
+//         Z pulse from the encoder is detected will correct this.
+//       - This version requires recompiling of the instance data block.
+//       - Added input FM_STS_SET (Z pulse from encoder).
+//       - At first scan, rotate forward until the Z pulse from the encoder is
+//         detected. After that, execute the SEEK HOME cycle as before. This      
+//         ensures that after power up the counter value is valid.
+//       - Activated the UserConfig.Cal_req.
+//       - Do not write home index fault when in manual mode.
 //v2.46: - No instance data changes / minor change only.
 //       - Consolidated networks to clear manual run requests.
 //v2.45: - This version requires recompiling of the instance data block.
@@ -258,21 +274,69 @@ TITLE =Indicate internal SP > 0
       >I    ; 
       =     #Bin_GT_0; 
 NETWORK
-TITLE =First scan
-//On first scan:
-//- Force re-reading of the target (if setpoint is supplied).
-//- Cancel any calibration in progress.
-//- Force SeekHome.
+TITLE =Init - Trigger from first scan
+//v2.5: The Init cycle causes the motor to run forward until the encoder Z 
+//pulse is detected.
       A     #UserConfig.First_scan; 
+      S     #Exec_init; 
+NETWORK
+TITLE =Init - Deny cal & seek home *NOT USED*
+//v2.5 mod: Since we also enforce a init run at the start of a calibration, we do 
+//not want to deny the calibratin request. Originally:
+//
+//A #Exec_init
+//R #UserConfig.Cal_req
+//R #Exec_home_cal
+//R #SeekHome
+NETWORK
+TITLE =Init - Indicate busy
+
+      A     #Exec_init; 
+      =     #UserConfig.Init_busy; 
+NETWORK
+TITLE =Init - Enforce minimum run time
+//v2.5: The encoder may be stopped exactly on the Z pulse, so we run for a 
+//minimum time to ensure we are not on top of that Z pulse when initiating this 
+//to ensure counter roll-over.
+      A     #Exec_init; 
+      A     #MotorStatusFwd; 
       =     L      5.0; 
+      BLD   103; 
+      CALL #T_Init_dly (
+           IN                       := L      5.0,
+           PT                       := T#1S);
+
+      NOP   0; 
+NETWORK
+TITLE =Init - Time out
+//v2.5: Should the encoder Z pulse not be detected we signal a timeout fault.
+      A     #Exec_init; 
+      A     #MotorStatusFwd; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Init_TO (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.PositionFaultTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Init - Complete
+//v2.5: Once we detect the encoder Z pulse we interrupt the init run and execute 
+//the code that is needed for first scan:
+//- End the init run.
+//- Force a setpoint lookup (if setpoint is supplied).
+//- Force a seek home.
+      A     #T_Init_dly.Q; 
+      A     #FM_STS_SET; 
+      =     L      5.0; 
+      A     L      5.0; 
+      BLD   102; 
+      R     #Exec_init; 
       A     L      5.0; 
       JNB   _004; 
       L     -1; 
       T     #Intern_SP_prev; 
 _004: NOP   0; 
-      A     L      5.0; 
-      BLD   102; 
-      R     #Exec_home_cal; 
       A     L      5.0; 
       BLD   102; 
       S     #SeekHome; 
@@ -313,6 +377,17 @@ F1:   +AR1  P#4.0; // [ No match, next bin from table
 
 F2:   NOP   0; 
 NETWORK
+TITLE =Calibration - Execute from user request
+
+      A     #UserConfig.Cal_req; 
+      S     #Exec_home_cal; 
+      R     #UserConfig.Cal_req; 
+NETWORK
+TITLE =Calibratin - Indicate cal running
+
+      A     #Exec_home_cal; 
+      =     #UserConfig.Cal_busy; 
+NETWORK
 TITLE =Calibration - exit without proxy option
 //When the home proxy option is not enabled we do not allow a calibration to be 
 //executed.
@@ -328,10 +403,12 @@ TITLE =Calibration - force SeekHome
 //faults that would otherwise interfere with the calibration. (This did not 
 //require reloading the instance data block.)
 //v2.43: Moved TEMP one-shot to STAT.
+//v2.5: Also force a encode initialization.
       A     #Exec_home_cal; 
       FP    #Home_cal_pls; 
       S     #SeekHome; 
       =     #Exec_home_cal_OS; 
+      S     #Exec_init; 
 NETWORK
 TITLE =Combine fault reset requests
 //v2.42: At the start of a calibration we also clear faults to allow motor 
@@ -500,6 +577,7 @@ TITLE =Positioning timeout - Monitor positioning time
       )     ; 
       AN    #PositioningFault; 
       AN    #HomeIndexFault; 
+      AN    #Exec_init; 
       A     #MoveEnable; 
       AN    #Manual; 
       =     L      5.0; 
@@ -513,9 +591,13 @@ NETWORK
 TITLE =Positioning timeout - Write fault
 //v2.42: Clear the timeout fault at the start of a calibration to permit motor 
 //movement.
+//v2.5: Also signal timeout fault during init run (Z pulse not detected).
       A     #Fault_reset_2; 
       R     #PositioningFault; 
-      A     #T_Pos.Q; 
+      A(    ; 
+      O     #T_Pos.Q; 
+      O     #T_Init_TO.Q; 
+      )     ; 
       S     #PositioningFault; 
       NOP   0; 
 NETWORK
@@ -534,10 +616,11 @@ TITLE =Selection fault - Detect invalid equipment setpoint
       NOP   0; 
 NETWORK
 TITLE =Home index - Detect home index proxy
-
+//v2.5: Ignore the home index proxy while in the INIT cycle.
       A     #HomeIndexProxy; 
       FP    #HomeProxy_pls; 
       A     #UserConfig.UseHomeIndexProxy; 
+      AN    #Exec_init; 
       =     #HomeProxy; 
 NETWORK
 TITLE =Home index - Clear all values when calibrating
@@ -634,7 +717,9 @@ NETWORK
 TITLE =Home index fault - write fault
 //Check if the home index pulse occurred within the expected deadband. If not, 
 //alert the operator.
+//v2.5: Do not write home index fault when in manual mode.
       A     #HomeProxy; 
+      AN    #Manual; 
       AN    #Exec_home_cal; 
       A(    ; 
       A     #MotorStatusFwd; 
@@ -1139,13 +1224,17 @@ NETWORK
 TITLE =Energize forward contactor
 //22Jan16: v2.43: Prohibit energizing contactors without enable signal.
 //09Feb16: (STP) v2.45: Consolidated two networks.
+//v2.5: Run forward during the initialization.
       A(    ; 
       AN    #Manual; 
+      A(    ; 
       AN    #PosAchd_internal; 
       A     #GoForward; 
       A(    ; 
       O     #JogRqd; 
       ON    #PreactRange; 
+      )     ; 
+      O     #Exec_init; 
       )     ; 
       O     ; 
       A     #Manual; 
@@ -1161,6 +1250,7 @@ NETWORK
 TITLE =Energize reverse contactor
 //22Jan16: v2.43: Prohibit energizing contactors without enable signal.
 //09Feb16: (STP) v2.45: Consolidated two networks.
+//v2.5: Run forward during the initialization.
       A(    ; 
       AN    #Manual; 
       AN    #PosAchd_internal; 
@@ -1176,6 +1266,7 @@ TITLE =Energize reverse contactor
       O     #ManualJogRev; 
       )     ; 
       )     ; 
+      AN    #Exec_init; 
       AN    #MotorRunFwd; 
       A     #OK_to_start; 
       =     #MotorRunRev; 
