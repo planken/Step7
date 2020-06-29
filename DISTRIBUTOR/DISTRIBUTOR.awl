@@ -1,4 +1,4 @@
-FUNCTION_BLOCK "DISTR 2.45"
+FUNCTION_BLOCK "DISTR 2.46"
 TITLE =Distributor control FM350-1
 //Distributor control for Hi-Pro Olds for use with S7 FM350-1 counter and 
 //Simatic counter control function.
@@ -112,6 +112,8 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Comments
+//v2.46: - No instance data changes / minor change only.
+//       - Consolidated networks to clear manual run requests.
 //v2.45: - This version requires recompiling of the instance data block.
 //       - Determine shortest path to home index instead of fixed CW.
 //       - During SeekHome, latch the direction to prevent reversal if the home 
@@ -1061,19 +1063,17 @@ TITLE =Indicate OK to start
       A     #MoveEnable; 
       =     #OK_to_start; 
 NETWORK
-TITLE =Manual control - Clear when not enabled
-
+TITLE =Manual control - Clear when not desired
+//20Feb16: (STP) v2.46: Consolidated two networks.
+//Clear the manual requests if:
+// - Distributor currently not in manual mode.
+// - During a general fault.
+// - If move enable signal is false.
+// - If the OK to start is false (e.g. during the backspin delay).
       ON    #Manual; 
       O     #GeneralFault; 
       ON    #MoveEnable; 
-      R     #ManualRunFwd; 
-      R     #ManualJogFwd; 
-      R     #ManualRunRev; 
-      R     #ManualJogRev; 
-NETWORK
-TITLE =Manual control - clear manual requests if not OK to start
-//Disallow reversal during the backspin timer.
-      AN    #OK_to_start; 
+      ON    #OK_to_start; 
       R     #ManualRunFwd; 
       R     #ManualJogFwd; 
       R     #ManualRunRev; 
