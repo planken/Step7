@@ -1,0 +1,1059 @@
+FUNCTION_BLOCK "Siemens 3RW44 v1.2"
+TITLE =SIRIUS SOFT STARTER 3RW44
+//Sirius 3RW44 series soft starter control. This code uses SFC58 and SFC59 calls 
+//to communicate with the starter over Profibus. It offers start/stop control, 
+//mode and load monitoring, as well as rudimentary parameter read/write. See 
+//network comments for more details.
+//
+//Error#  Description
+//------  ------------
+//*FATAL ERRORS*
+//  1001  Invalid parameter set specified.
+//  1002  Invalid DB number specified. 
+//  1003  Invalid PI address specified.
+//  1004  Invalid PQ address specified. 
+//*NON-FATAL ERRORS*
+//  2000  range errors for read followed by record number
+//  3000  range errors for write followed by record number  
+//  E.g. status 2141 means error while reading dataset 141.
+//       status 3092 means error writing dataset 92.
+//
+//VERSION 1.2: Must specifically enable DPV1 parameter write feature as DPV0 does 
+//not support it and causes faults.
+//VERSION 1.1: On dataset writes, force channel number to 0x20.
+AUTHOR : STP
+FAMILY : SIRIUS
+NAME : '3RW44'
+VERSION : 1.2
+
+
+VAR_INPUT
+  I_Start : BOOL ;	//Start command
+  I_MotorCCW : BOOL ;	//Motor reverse request
+  I_MotorSlow : BOOL ;	//Motor slow speed request
+  I_FaultReset : BOOL ;	//Fault reset / trip reset
+  I_PI_ADDR : INT ;	//Peripheral input address from hardware config
+  I_PQ_ADDR : INT ;	//Peripheral output address from hardware config
+  I_ParmSet : INT ;	//Parameter set to use (1..3)
+  I_Parm_DB : INT ;	
+END_VAR
+VAR_OUTPUT
+  O_Ready : BOOL ;	//Ready status
+  O_Running : BOOL ;	//Motor running forward/reverse
+  O_Ramping : BOOL ;	//Soft starter starting mode active
+  O_Stopping : BOOL ;	//Soft starter stopping mode active
+  O_U_line_avg : INT ;	//Avergare line voltage phase to phase
+  O_I_line_avg : INT ;	//Average line current
+  O_I_phase_pct : INT ;	//Average phase current as %
+  O_F_out : INT ;	//Output frequency
+  O_Asymmetry : INT ;	//Current asymmetry
+  O_T_heatsink : INT ;	//Heatsink temperature
+  O_Power : INT ;	//Output power [hp]
+END_VAR
+VAR_IN_OUT
+  IO_RampDone : BOOL ;	//Ramp up completed
+  IO_Warning : BOOL ;	//Soft starter warning
+  IO_Fault : BOOL ;	//Soft starter fault
+  IO_DataFault : BOOL ;	//At least one Profibus fault
+  IO_Status : INT ;	//Status value
+END_VAR
+VAR
+  DS94_Rq : BOOL ;	
+  DS94_Busy : BOOL ;	
+  DS94_RetVal : INT ;	
+  DS94 : "Sirius_DataSet94";	
+  DS92_Rq : BOOL ;	
+  DS92_Busy : BOOL ;	
+  DS92_RetVal : INT ;	
+  DS92 : "Sirius_DataSet92";	
+  PI : STRUCT 	
+   Ready : BOOL ;	
+   MotorOn : BOOL ;	
+   GroupError : BOOL ;	
+   GroupWarning : BOOL ;	
+   Input1 : BOOL ;	
+   Input2 : BOOL ;	
+   Input3 : BOOL ;	
+   Input4 : BOOL ;	
+   MotorAmps0 : BOOL ;	
+   MotorAmps1 : BOOL ;	
+   MotorAmps2 : BOOL ;	
+   MotorAmps3 : BOOL ;	
+   MotorAmps4 : BOOL ;	
+   MotorAmps5 : BOOL ;	
+   ManLocMode : BOOL ;	
+   Ramping : BOOL ;	
+  END_STRUCT ;	
+  PQ : STRUCT 	
+   MotorCW : BOOL ;	
+   MotorCCW : BOOL ;	
+   Spare1 : BOOL ;	
+   TripReset : BOOL ;	
+   EmerStart : BOOL ;	
+   Spare2 : BOOL ;	
+   SlowSpeed : BOOL ;	
+   Spare3 : BOOL ;	
+   Output1 : BOOL ;	
+   Output2 : BOOL ;	
+   ParmSet0 : BOOL ;	
+   ParmSet1 : BOOL ;	
+   Spare4 : BOOL ;	
+   Spare5 : BOOL ;	
+   Spare6 : BOOL ;	
+   DisQckStop : BOOL ;	
+  END_STRUCT ;	
+  Read : STRUCT 	
+   TechParm : ARRAY  [2 .. 3 ] OF STRUCT 	
+    Req : BOOL ;	
+    Busy : BOOL ;	
+    RecordNo : BYTE ;	
+    Status : INT ;	
+    Pulse : BOOL ;	
+   END_STRUCT ;	
+  END_STRUCT ;	
+  Write : STRUCT 	
+   TechParm : ARRAY  [2 .. 3 ] OF STRUCT 	
+    Req : BOOL ;	
+    Busy : BOOL ;	
+    RecordNo : BYTE ;	
+    Status : INT ;	
+    Pulse : BOOL ;	
+   END_STRUCT ;	
+  END_STRUCT ;	
+  RampDonePulse : BOOL ;	//Pulse bit to detect ramp done
+  RampDoneOS : BOOL ;	//Ramp done one-shot
+  Alarm_Aux1 : BOOL ;	//Useed in alarm logic
+  Alarm_Aux2 : BOOL ;	//Used in alarm logic
+  AlarmHistory : STRUCT 	
+   CntBl_OL_Flt : BOOL ;	
+   CntBl_Flt : BOOL ;	
+   OL_Flt : BOOL ;	
+   Asymm_Flt : BOOL ;	
+   CurrLim_Flt : BOOL ;	
+   Stall_Flt : BOOL ;	
+   Gnd_Flt : BOOL ;	
+   LossL1_Flt : BOOL ;	
+   LossL2_Flt : BOOL ;	
+   LossL3_Flt : BOOL ;	
+   CntBlShort_Flt : BOOL ;	
+   BP_Flt : BOOL ;	
+   Thyr1_Flt : BOOL ;	
+   Thyr2_Flt : BOOL ;	
+   Thyr3_Flt : BOOL ;	
+   PhCtrl_Flt : BOOL ;	
+   CntBl_Hot_Flt : BOOL ;	
+   NoMains_Flt : BOOL ;	
+  END_STRUCT ;	
+  CFG_DPV1_WR_EN : BOOL ;	//Write parameters (DPV1 compatible nodes only)
+  CFG_ParmRead : BOOL ;	
+  CFG_ParmWrite : BOOL ;	
+END_VAR
+VAR_TEMP
+  T_PI_AddrWord : WORD ;	
+  T_PQ_AddrWord : WORD ;	
+  T_ParmSetByte : BYTE ;	
+  T_AR1 : DWORD ;	
+  T_AR2 : DWORD ;	
+  T_TechParm2_Ptr : ANY ;	
+  T_TechParm3_Ptr : ANY ;	
+  T_Parm_DB : INT ;	
+  T_DataFlt1 : BOOL ;	
+  T_DataFlt2 : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =INITIAL ERROR TRAPPING
+//Some rudimentary error trapping to catch common mistakes during commissioning 
+//like not specifying PI and PQ address or DB number for parameter 
+//retrieval/storage.
+// First clear the status word
+      L     0; 
+      T     #IO_Status; 
+
+//-----------------------------------------------------------
+// -- FATAL ERRORS --
+// These errors will cease execution and return
+// control to the calling block.
+//-----------------------------------------------------------
+
+// If an invalid parameter set was specified, exit with an error
+      A(    ; 
+      L     #I_ParmSet; 
+      L     1; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #I_ParmSet; 
+      L     3; 
+      <=I   ; 
+      )     ; 
+      JC    _00a; 
+      L     1001; // Return error code
+      T     #IO_Status; 
+      SET   ; 
+      S     #IO_DataFault; // Force data fault
+      BEU   ; // Terminate
+
+// If an invalid DB was specified, exit with an error
+_00a: L     #I_Parm_DB; 
+      L     0; 
+      >I    ; 
+      JC    _00b; 
+      L     1002; // Return error code
+      T     #IO_Status; 
+      SET   ; 
+      S     #IO_DataFault; // Force data fault
+      BEU   ; // Terminate
+
+// If an invalid PI address was specified, exit with an error
+_00b: L     #I_PI_ADDR; 
+      L     0; 
+      >I    ; 
+      JC    _00c; 
+      L     1003; // Return error code
+      T     #IO_Status; 
+      SET   ; 
+      S     #IO_DataFault; // Force data fault
+      BEU   ; // Terminate
+
+// If an invalid PQ address was specified, exit with an error
+_00c: L     #I_PQ_ADDR; 
+      L     0; 
+      >I    ; 
+      JC    _00k; 
+      L     1004; // Return error code
+      T     #IO_Status; 
+      SET   ; 
+      S     #IO_DataFault; // Force data fault
+      BEU   ; // Terminate
+
+//-----------------------------------------------------------
+
+_00k: NOP   0; 
+
+
+// --- Added v1.2 ---
+// For DPV0 nodes, disable the write
+      AN    #CFG_DPV1_WR_EN; 
+      R     #CFG_ParmWrite; 
+NETWORK
+TITLE =READ DEVICE PERIPHERAL INPUTS
+//This is the first action in this function block. Here we read the 16 peripheral 
+//input bits from the process image and store that in the instance data block 
+//used by this function block.
+// Map the 16 peripheral input bits from the soft starter to the instance DB
+      TAR1  #T_AR1; // Store address register 1
+      L     #I_PI_ADDR; // Convert PI address to pointer
+      ITD   ; 
+      SLD   3; 
+      LAR1  ; // Load address register with address to PI
+      L     PIW [AR1,P#0.0]; // Load accu1 with 16 bits of peripheral inputs
+      LAR1  P##PI; // Load address register with address to instance DB
+      T     DIW [AR1,P#0.0]; // Copy accu1 to instance DB
+      LAR1  #T_AR1; // Restore address register 1
+
+//------------------------------------------------------------
+
+// Convert PI and PQ addresses to word format for SFCs
+      L     #I_PI_ADDR; 
+      T     #T_PI_AddrWord; 
+      L     #I_PQ_ADDR; 
+      T     #T_PQ_AddrWord; 
+
+NETWORK
+TITLE =READ DATASET 92
+//Cyclically read dataset 92 from the soft starter over the Profibus.
+// Common RET_VAL values:
+//   0x7000 : First call with REQ=0, BUSY=0, no data xfer active.
+//   0x7001 : First call with REQ=1, BUSY=1, no data xfer active.
+//   0x7002 : Interim call (REQ irrelevant), data xfer active, BUSY=1.
+//   0x80** : Error code.
+
+// Request dataset 92, read device diagnostic data
+      SET   ; // Cyclically request data for now
+      =     #DS92_Rq; 
+      CALL "RD_REC" (
+           REQ                      := #DS92_Rq,// Request
+           IOID                     := B#16#54,// B#16#54 = Peripheral input 
+           LADDR                    := #T_PI_AddrWord,// PLC CPU station address as configured in h'ware config
+           RECNUM                   := B#16#5C,// Dataset requested: 92 = 0x5C
+           RET_VAL                  := #DS92_RetVal,// Return value
+           BUSY                     := #DS92_Busy,// Busy state
+           RECORD                   := #DS92);// Pointer to storage
+
+// Error trapping
+      L     #DS92_RetVal; 
+      AW    W#16#8000; // 0x80** are SFC errors
+      L     W#16#8000; 
+      ==I   ; 
+      JCN   _03a; 
+      L     2092; // 2000=read, dataset=92
+      T     #IO_Status; 
+_03a: NOP   0; 
+
+NETWORK
+TITLE =READ DATASET 94
+//Cyclically read dataset 92 from the soft starter over the Profibus.
+// Common RET_VAL values:
+//   0x7000 : First call with REQ=0, BUSY=0, no data xfer active.
+//   0x7001 : First call with REQ=1, BUSY=1, no data xfer active.
+//   0x7002 : Interim call (REQ irrelevant), data xfer active, BUSY=1.
+//   0x80** : Error code.
+
+// Request dataset 94, read measured values
+      SET   ; // Cyclically request data for now 
+      =     #DS94_Rq; 
+      CALL "RD_REC" (
+           REQ                      := #DS94_Rq,// Request
+           IOID                     := B#16#54,// B#16#54 = Peripheral input 
+           LADDR                    := #T_PI_AddrWord,// PLC CPU station address as configured in h'ware config
+           RECNUM                   := B#16#5E,// Dataset requested: 94 = 0x5E
+           RET_VAL                  := #DS94_RetVal,// Return value
+           BUSY                     := #DS94_Busy,// Busy state
+           RECORD                   := #DS94);// Pointer to storage
+
+// Error trapping
+      L     #DS94_RetVal; 
+      AW    W#16#8000; // 0x80** are SFC errors
+      L     W#16#8000; 
+      ==I   ; 
+      JCN   _04a; 
+      L     2094; // 2000=read, dataset=94
+      T     #IO_Status; 
+_04a: NOP   0; 
+
+NETWORK
+TITLE =WRITE FUNCTION BLOCK OUTPUT PARAMETERS
+//Write the status output bits for this function block.
+// Ready status
+      A     #PI.Ready; // Ready status from peripheral input
+      A     #DS92.Ready; // Ready status from profibus
+      =     #O_Ready; // --Return soft starter ready state
+
+// Running status
+      A(    ; 
+      O     #DS92.MotorCW; // Profibus reports running clockwise
+      O     #DS92.MotorCCW; // Profibus reporting running counter clockwise
+      )     ; 
+      =     #O_Running; // --Return motor running status
+
+// Indicate ramping
+      A     #DS92.Starting; // Profibus reports ramp up
+      =     #O_Ramping; // --Return ramp up status
+
+// Indicate stopping
+      A     #DS92.Stopping; // Profibus reports ramp down
+      =     #O_Stopping; // --Return ramp down status
+
+// Indicate ramp up has completed
+      A(    ; 
+      O     #DS92.MotorCW; // Running CW or CCW
+      O     #DS92.MotorCCW; 
+      )     ; 
+      AN    #DS92.Stopping; // Not ramping up
+      AN    #DS92.Starting; // Not ramping down
+      S     #IO_RampDone; // --Update up-to-speed status (up-to-speed)
+
+      O     #DS92.Stopping; // Ramping down
+      O     #DS92.Starting; // Ramping up
+      O     ; 
+      AN    #DS92.MotorCW; // Not running
+      AN    #DS92.MotorCCW; 
+      R     #IO_RampDone; // --Update up-to-speed status (ramping)
+
+// Average line phase voltage
+      L     #DS94.U_L1L2; 
+      L     #DS94.U_L2L3; 
+      +I    ; 
+      L     #DS94.U_L1L3; 
+      +I    ; 
+      ITD   ; 
+      DTR   ; 
+      L     3.000000e+001; // Average: U * 1/3 * 1/10 for 1 implied decimal
+      /R    ; 
+      RND   ; 
+      T     #O_U_line_avg; // --Return average line phase to phase voltage [V]
+
+// Average line phase current
+      L     #DS94.I_L1; 
+      L     #DS94.I_L2; 
+      +D    ; 
+      L     #DS94.I_L3; 
+      +D    ; 
+      DTR   ; 
+      L     3.000000e+002; // Average: I * 1/3 * 1/100 for 2 implied decimals
+      /R    ; 
+      RND   ; 
+      T     #O_I_line_avg; // --Return average line phase current [A]
+
+// Average phase current as %
+      L     #DS94.L1_Amps; 
+      L     #DS94.L2_Amps; 
+      +I    ; 
+      L     #DS94.L3_Amps; 
+      +I    ; // Sum all values
+      ITD   ; 
+      DTR   ; 
+      L     3.125000e+000; // Unit is [3.125%]
+      *R    ; 
+      L     3.000000e+000; // Average
+      /R    ; 
+      RND   ; 
+      T     #O_I_phase_pct; // --Return motor load [%]
+
+// Output frequency
+      L     #DS94.FreqOut; // Output frequency [0.5Hz]
+      L     2; 
+      /I    ; 
+      T     #O_F_out; // --Return output frequency [Hz]
+// ..return negative frequency for CCW rotation
+      A     #I_MotorCCW; 
+      JCN   _05a; 
+//      L     #O_F_out
+//      L     -1
+//      *I    
+//      T     #O_F_out                    // --Negative output frequency [Hz]
+
+// Current asymmetry
+_05a: L     #DS94.Asymmetry; 
+      T     #O_Asymmetry; // --Return current asymmetry [%]
+
+// Heatsink temperature
+      L     #DS94.T_heatsink; 
+      T     #O_T_heatsink; // --Return heatsink temperature [deg C]
+
+// Output power
+      L     #DS94.P_out; // Output power [0.1 W]
+      DTR   ; 
+      L     7.460000e+003; 
+      /R    ; 
+      RND   ; 
+      T     #O_Power; // --Return output power [Hp]
+
+NETWORK
+TITLE =WRITE WARNING / FAULT STATUS
+//The combined GROUP WARNING and GROUP FAULT indicate that at least one warning 
+//or fault was detected. Here, we select which warnings or faults we wish to pass 
+//on, with the notion that warnings should typically not shut down the motor and 
+//alarms will. However, there are instances where the soft starter itself stops 
+//the motor on certain alarms.
+//12Apr10: (STP) Some alarms need to self-clear, e.g. the "no mains" alarm so 
+//that when the drive comes back online it does not require intervention. But we 
+//still want to stop the drive during the alarm.
+//26Jan11: (STP) Do not raise a warning with an active fault.
+//-------------------------------------------
+// Warning status
+//-------------------------------------------
+
+// Note: this shall not interrupt system operation.
+
+      A(    ; 
+      O     #DS92.AsymmWarn; 
+      O     #DS92.HiAmp; 
+      O     #DS92.Ground; 
+      O     #DS92.CtrlVoltLow; 
+      O     #DS92.BusError; 
+      O     #DS92.PLC_Stop; 
+      O     #DS92.PLC_PI_Flt; 
+      O     #DS92.CtrlVoltHi; 
+      O     #DS92.TimeUnderWarn; 
+      O     #DS92.HeatBldWarn; 
+      )     ; 
+      AN    #IO_Fault; 
+      =     #IO_Warning; 
+
+//-------------------------------------------
+// Fault status
+//-------------------------------------------
+
+// Note: this shall interrupt system operation.
+
+//- - - - - - - - - - - - - - -
+// Alarms that require a reset
+//- - - - - - - - - - - - - - -
+
+      A(    ; 
+      O     #DS92.CntBl_Ovrload; 
+      O     #DS92.CntBl_Damage; 
+      O     #DS92.OvrLoadFlt; 
+      O     #DS92.AsymmFlt; 
+      O     #DS92.AmpFlt; 
+      O     #DS92.StallFlt; 
+      O     #DS92.GroundFlt; 
+      O     #DS92.Loss_L1; 
+      O     #DS92.Loss_L2; 
+      O     #DS92.Loss_L3; 
+      O     #DS92.CntBlShort; 
+      O     #DS92.BypassFlt; 
+      O     #DS92.Thyr1Flt; 
+      O     #DS92.Thyr2Flt; 
+      O     #DS92.Thyr3Flt; 
+      O     #DS92.PhaseCtrlFlt; 
+      O     #DS92.CntBlHot; 
+      )     ; 
+      S     #Alarm_Aux1; // Set permanent alarm
+
+// Clear alarm
+      A     #I_FaultReset; // Reset input
+      R     #Alarm_Aux1; // Clear permanent alarm
+
+//- - - - - - - - - - - - - - -
+// Alarms that self clear
+//- - - - - - - - - - - - - - -
+
+// E.g. when the main power fails, we want the starter
+// to come back online automatically without faults
+// and without requiring a WinCC reset.
+      A(    ; 
+      O     #IO_DataFault; // Data read alarm
+      O     #DS92.NoMains; // Input power failure
+      )     ; 
+      =     #Alarm_Aux2; // Self-clearing alarm
+
+//- - - - - - - - - - - - - - -
+// Combined alarm output
+//- - - - - - - - - - - - - - -
+
+      O     #Alarm_Aux1; // Permanent alarm
+      O     #Alarm_Aux2; // Self-clearing alarm
+      =     #IO_Fault; // Combined alarm status
+
+//-------------------------------------------
+// Alarm history
+//-------------------------------------------
+
+// Store alarm bits for analysis later
+// so we know which of the alarms
+// caused the stop
+
+      A     #DS92.CntBl_Ovrload; 
+      S     #AlarmHistory.CntBl_OL_Flt; 
+
+      A     #DS92.CntBl_Damage; 
+      S     #AlarmHistory.CntBl_Flt; 
+
+      A     #DS92.OvrLoadFlt; 
+      S     #AlarmHistory.OL_Flt; 
+
+      A     #DS92.AsymmFlt; 
+      S     #AlarmHistory.Asymm_Flt; 
+
+      A     #DS92.AmpFlt; 
+      S     #AlarmHistory.CurrLim_Flt; 
+
+      A     #DS92.StallFlt; 
+      S     #AlarmHistory.Stall_Flt; 
+
+      A     #DS92.GroundFlt; 
+      S     #AlarmHistory.Gnd_Flt; 
+
+      A     #DS92.Loss_L1; 
+      S     #AlarmHistory.LossL1_Flt; 
+
+      A     #DS92.Loss_L2; 
+      S     #AlarmHistory.LossL2_Flt; 
+
+      A     #DS92.Loss_L3; 
+      S     #AlarmHistory.LossL3_Flt; 
+
+      A     #DS92.CntBlShort; 
+      S     #AlarmHistory.CntBlShort_Flt; 
+
+      A     #DS92.BypassFlt; 
+      S     #AlarmHistory.BP_Flt; 
+
+      A     #DS92.Thyr1Flt; 
+      S     #AlarmHistory.Thyr1_Flt; 
+
+      A     #DS92.Thyr2Flt; 
+      S     #AlarmHistory.Thyr2_Flt; 
+
+      A     #DS92.Thyr3Flt; 
+      S     #AlarmHistory.Thyr3_Flt; 
+
+      A     #DS92.PhaseCtrlFlt; 
+      S     #AlarmHistory.PhCtrl_Flt; 
+
+      A     #DS92.CntBlHot; 
+      S     #AlarmHistory.CntBl_Hot_Flt; 
+
+//- - - - - - - - - - - - - - -
+
+      A     #DS92.NoMains; 
+      S     #AlarmHistory.NoMains_Flt; 
+
+//- - - - - - - - - - - - - - -
+
+// Clear alarm history
+
+      A     #I_FaultReset; // Reset input
+      R     #AlarmHistory.CntBl_OL_Flt; 
+      R     #AlarmHistory.CntBl_Flt; 
+      R     #AlarmHistory.OL_Flt; 
+      R     #AlarmHistory.Asymm_Flt; 
+      R     #AlarmHistory.CurrLim_Flt; 
+      R     #AlarmHistory.Stall_Flt; 
+      R     #AlarmHistory.Gnd_Flt; 
+      R     #AlarmHistory.LossL1_Flt; 
+      R     #AlarmHistory.LossL2_Flt; 
+      R     #AlarmHistory.LossL3_Flt; 
+      R     #AlarmHistory.CntBlShort_Flt; 
+      R     #AlarmHistory.BP_Flt; 
+      R     #AlarmHistory.Thyr1_Flt; 
+      R     #AlarmHistory.Thyr2_Flt; 
+      R     #AlarmHistory.Thyr3_Flt; 
+      R     #AlarmHistory.PhCtrl_Flt; 
+      R     #AlarmHistory.CntBl_Hot_Flt; 
+      R     #AlarmHistory.NoMains_Flt; 
+
+NETWORK
+TITLE =PREPARE PERIPHERAL OUTPUTS FOR WRITE
+//Using the inputs for this function block and the various status bits and alarms 
+//from the soft starter we now write the bits that will later be sent over the 
+//Profibus to the soft starter.
+// Start command for clockwise operation
+// This must be mutually exclusive with counter clockwise operation
+      A     #I_Start; // Start command
+      AN    #IO_Fault; // No fault
+      AN    #I_MotorCCW; // CW rotation desired
+      AN    #PQ.MotorCCW; // Not already activating CCW
+      =     #PQ.MotorCW; // --start command for motor forward
+
+// Start command for counter clockwise operation
+// This must be mutually exclusive with clockwise operation
+      A     #I_Start; // Start command
+      AN    #IO_Fault; // No fault
+      A     #I_MotorCCW; // CCW rotation desired
+      AN    #PQ.MotorCW; // Not already activating CW
+      =     #PQ.MotorCCW; // --start command for motor reverse
+
+// Spare
+      CLR   ; 
+      =     #PQ.Spare1; // --spare
+
+// Reset faults
+      A     #I_FaultReset; // Bit must be cleared outside this FB
+      =     #PQ.TripReset; // --trip reset
+
+// Emergency start
+      CLR   ; 
+      =     #PQ.EmerStart; // --emergency start
+
+// Spare
+      CLR   ; 
+      =     #PQ.Spare2; // --spare
+
+// Slow speed
+      A     #I_MotorSlow; 
+      =     #PQ.SlowSpeed; // --slow speed
+
+// Spare
+      CLR   ; 
+      =     #PQ.Spare3; // --spare
+
+// Output 1
+      CLR   ; 
+      =     #PQ.Output1; // --output 1
+
+// Output 2
+      CLR   ; 
+      =     #PQ.Output2; // --output 2
+
+// Determine parameter set to be used
+// (The parameter set request can change during run but
+// the Sirius soft starter will not actually change
+// until ramp down has been completed.)
+      CLR   ; // Default to set 1, pattern 00
+      =     #PQ.ParmSet0; // --parameter set, bit 0
+      CLR   ; 
+      =     #PQ.ParmSet1; // --parameter set, bit 1
+
+      L     #I_ParmSet; // Check if parameter set 2 desired
+      L     2; 
+      ==I   ; 
+      JCN   _06a; 
+      SET   ; // Set to 2, pattern 01
+      =     #PQ.ParmSet0; 
+      CLR   ; 
+      =     #PQ.ParmSet1; 
+
+_06a: L     #I_ParmSet; 
+      L     3; 
+      ==I   ; 
+      JCN   _06b; 
+      SET   ; // Set to 3, pattern 10
+      =     #PQ.ParmSet0; 
+      CLR   ; 
+      =     #PQ.ParmSet1; 
+
+// Spare
+_06b: CLR   ; 
+      =     #PQ.Spare4; // --spare
+      =     #PQ.Spare5; // --spare
+      =     #PQ.Spare6; // --spare
+
+// Disable quick stop
+      SET   ; 
+      =     #PQ.DisQckStop; // --disable quick stop
+
+NETWORK
+TITLE =WRITE PERIPHERAL OUTPUTS
+//This is the last action in this function block.
+// Map the instance DB to the 16 peripheral output bits for the soft starter
+      TAR1  #T_AR1; // Store address register 1
+      TAR2  #T_AR2; // Store address register 2
+      L     #I_PQ_ADDR; // Convert PQ address to pointer
+      ITD   ; 
+      SLD   3; 
+      LAR1  ; // Store in address register 2
+      LAR2  P##PQ; // Load address register 1 with address from instance DB
+      L     DIW [AR2,P#0.0]; // Load accumulator with 16 bits from instance DB
+      T     PQW [AR1,P#0.0]; // Copy 16 bits to peripheral output address
+      LAR1  #T_AR1; // Restore address register 1
+      LAR2  #T_AR2; // Restore address register 2
+
+NETWORK
+TITLE =READ/WRITE TECHNOLOGY PARAMETERS 2 AND 3
+//Here we read from and write to the "technology parameters" 2 and 3. If an 
+//invalid parameter set is specified we default to parameter set 1.
+//
+//Parameter set#        Tech parms 2 record#         Tech parms 3 record#
+//--------------        --------------------         --------------------
+//      1                       131                          132
+//      2                       141                          142
+//      3                       151                          152
+//
+//--------------------------------------------------------------
+// Default to the record numbers for parameter set 1
+//--------------------------------------------------------------
+
+// Load record number for technology parameters 2
+      L     B#16#83; // 131 = 0x83
+      T     #Read.TechParm[2].RecordNo; 
+      T     #Write.TechParm[2].RecordNo; 
+// Load record number for technology parameters 3
+      L     B#16#84; // 132 = 0x84
+      T     #Read.TechParm[3].RecordNo; 
+      T     #Write.TechParm[3].RecordNo; 
+
+//--------------------------------------------------------------
+// If the user specified parameter set 2, load its record numbers
+//--------------------------------------------------------------
+
+      L     #I_ParmSet; 
+      L     2; 
+      ==I   ; 
+      JCN   _09a; 
+// Load record number for technology parameters 2
+      L     B#16#8D; // 141 = 0x8D
+      T     #Read.TechParm[2].RecordNo; 
+      T     #Write.TechParm[2].RecordNo; 
+// Load record number for technology parameters 3
+      L     B#16#8E; // 142 = 0x8E
+      T     #Read.TechParm[3].RecordNo; 
+      T     #Write.TechParm[3].RecordNo; 
+
+//--------------------------------------------------------------
+// If the user specified parameter set 3, load its record numbers
+//--------------------------------------------------------------
+
+_09a: L     #I_ParmSet; 
+      L     3; 
+      ==I   ; 
+      JCN   _09b; 
+// Load record number for technology parameters 2
+      L     B#16#97; // 151 = 0x97
+      T     #Read.TechParm[2].RecordNo; 
+      T     #Write.TechParm[2].RecordNo; 
+// Load record number for technology parameters 3
+      L     B#16#98; // 152 = 0x98
+      T     #Read.TechParm[3].RecordNo; 
+      T     #Write.TechParm[3].RecordNo; 
+_09b: NOP   0; 
+
+//--------------------------------------------------------------
+
+// This FB has a DB number as input parameter. Here we will build the
+// complete ANY pointer that will be used by the SFC calls based on
+// the DB number, number of bytes, and offset in the DB. The DB is
+// supplied with this FB and must reflect the technology parameters 2
+// followed by technology parameters 3 (see the Sirius manual, 
+// chapter 8, "Profibus DP communication module"). On a read request
+// this is where the parameters will be stored from the starter. On
+// a write request this is where the parameters will be read from and
+// sent to the starter.
+
+// Build the ANY pointers to be used in the SFC calls.
+// This is where we want to write the data to from the starter 
+// or read the data from to the starter depending on the read/write
+// request from the user.
+
+// Technology parameters 2 (records 131, 141, or 151)
+//   Byte length  = 138 bytes
+//   Start offset = DBX0.0
+      LAR1  P##T_TechParm2_Ptr; // Start address of any pointer
+      L     B#16#10; // Byte n: syntax ID
+      T     LB [AR1,P#0.0]; // ..transfer it to the pointer
+      L     B#16#2; // Byte n+1: value for type BYTE
+      T     LB [AR1,P#1.0]; // ..transfer it to the pointer
+      L     138; // Byte n+2: quantity to read in bytes
+      T     LW [AR1,P#2.0]; // ..transfer it to the pointer
+      L     #I_Parm_DB; // Byte n+4: data block number
+      T     LW [AR1,P#4.0]; // ..transfer it to the pointer
+      L     P#DBX 0.0; // Byte n+6: area pointer (start offset in DB)
+      T     LD [AR1,P#6.0]; // ..transfer it to the pointer
+
+// Technology parameters 3 (records 132, 142, or 152)
+//   Byte length  = 64 bytes
+//   Start offset = DBX138.0
+      LAR1  P##T_TechParm3_Ptr; // Start address of any pointer
+      L     B#16#10; // Byte n: syntax ID
+      T     LB [AR1,P#0.0]; // ..transfer it to the pointer
+      L     B#16#2; // Byte n+1: value for type BYTE
+      T     LB [AR1,P#1.0]; // ..transfer it to the pointer
+      L     64; // Byte n+2: quantity to read in bytes
+      T     LW [AR1,P#2.0]; // ..transfer it to the pointer
+      L     #I_Parm_DB; // Byte n+4: data block number
+      T     LW [AR1,P#4.0]; // ..transfer it to the pointer
+      L     P#DBX 138.0; // Byte n+6: area pointer (start offset in DB)
+      T     LD [AR1,P#6.0]; // ..transfer it to the pointer
+
+
+NETWORK
+TITLE =READ TECH PARAMETERS 2
+//Read the technology parameters 2 (records 131, 141, or 151) and store in the 
+//user DB. The starter is queried for technology parameters 2 and data is stored 
+//in the parameter DB specified. This allows a copy between parameter sets by 
+//specifying one parameter set for READ, then another parameter set for WRITE.
+//-------------------------------------------------------
+// Technology parameters 2 READ
+//-------------------------------------------------------
+
+// Read request logic
+      A     #CFG_ParmRead; 
+      R     #CFG_ParmWrite; // Read over write
+      FP    #Read.TechParm[2].Pulse; 
+      S     #Read.TechParm[2].Req; // Tech.parms 2 read request
+      S     #Read.TechParm[3].Req; // Tech.parms 3 read request
+      R     #CFG_ParmRead; // Clear user read request again
+
+// Send a read request for tech parameters 2
+      CALL "RD_REC" (
+           REQ                      := #Read.TechParm[2].Req,
+           IOID                     := B#16#54,
+           LADDR                    := #T_PI_AddrWord,
+           RECNUM                   := #Read.TechParm[2].RecordNo,
+           RET_VAL                  := #Read.TechParm[2].Status,
+           BUSY                     := #Read.TechParm[2].Busy,
+           RECORD                   := #T_TechParm2_Ptr);
+
+// Verify we're done reading tech parms 2
+      L     #Read.TechParm[2].Status; 
+      L     W#16#7002; // Done reading
+      ==I   ; 
+      A     #Read.TechParm[2].Busy; // Still busy
+      R     #Read.TechParm[2].Req; // Clear read request
+
+//--------------------------------------------------------------
+
+// Error trapping
+      L     #Read.TechParm[2].Status; 
+      AW    W#16#8000; // 0x80** are SFC errors
+      L     W#16#8000; 
+      ==I   ; 
+      JCN   _10a; 
+      L     #Read.TechParm[2].RecordNo; 
+      L     2000; // Error code for read
+      +I    ; 
+      T     #IO_Status; 
+_10a: NOP   0; 
+
+NETWORK
+TITLE =READ TECH PARAMETERS 3
+//Read the technology parameters 3 (records 132, 142, or 152) and store in the 
+//user DB. The starter is queried for technology parameters 2 and data is stored 
+//in the parameter DB specified. This allows a copy between parameter sets by 
+//specifying one parameter set for READ, then another parameter set for WRITE.
+//-------------------------------------------------------
+// Technology parameters 3 READ
+//-------------------------------------------------------
+
+// Send a read request
+      CALL "RD_REC" (
+           REQ                      := #Read.TechParm[3].Req,
+           IOID                     := B#16#54,
+           LADDR                    := #T_PI_AddrWord,
+           RECNUM                   := #Read.TechParm[3].RecordNo,
+           RET_VAL                  := #Read.TechParm[3].Status,
+           BUSY                     := #Read.TechParm[3].Busy,
+           RECORD                   := #T_TechParm3_Ptr);
+
+// Verify we're done reading tech parms 3
+      L     #Read.TechParm[3].Status; 
+      L     W#16#7002; // Done reading
+      ==I   ; 
+      A     #Read.TechParm[3].Busy; // Still busy
+      R     #Read.TechParm[3].Req; // Clear read request
+
+//--------------------------------------------------------------
+
+// Error trapping
+      L     #Read.TechParm[3].Status; 
+      AW    W#16#8000; // 0x80** are SFC errors
+      L     W#16#8000; 
+      ==I   ; 
+      JCN   _11b; 
+      L     #Read.TechParm[3].RecordNo; // Error code for read
+      L     2000; 
+      +I    ; 
+      T     #IO_Status; 
+_11b: NOP   0; 
+
+NETWORK
+TITLE =WRITE TECH PARAMETERS 2
+
+//-------------------------------------------------------
+// Technology parameters 2 WRITE
+//-------------------------------------------------------
+
+// Skip read for DPV0 slaves
+      AN    #CFG_DPV1_WR_EN; 
+      R     #Write.TechParm[2].Req; 
+      R     #Write.TechParm[3].Req; 
+
+      AN    #CFG_DPV1_WR_EN; 
+      JC    _12b; 
+
+// Write request logic
+      A     #CFG_ParmWrite; 
+      AN    #CFG_ParmRead; 
+      FP    #Write.TechParm[2].Pulse; 
+      S     #Write.TechParm[2].Req; // Tech.parms 2 read request
+      S     #Write.TechParm[3].Req; // Tech.parms 3 read request
+      R     #CFG_ParmWrite; // Clear user request again
+
+// Write desired channel to parameter data block to allow for PLC write
+// Byte 0-3 form the preamble of the data
+// Byte 0 is the coordination:
+//  - 0x20 writing via channel C1 (PLC)
+//  - 0x30 writing via channel C2 (PC)
+//  - 0x40 writing via device interface
+      A     #Write.TechParm[2].Req; 
+      JCN   _12a; 
+// We cannot open the DB directly by referring to the
+// input parameter so we transfer it to the local stack
+// first and refer to the DB from there
+      L     #I_Parm_DB; // Load user DB nbr
+      T     #T_Parm_DB; // Copy to local stack
+      OPN   DB [#T_Parm_DB]; // Open the parameter DB
+      L     B#16#20; // Load channel nbr for PLC control
+      T     DBB    0; // Copy to DBB0 (parms2)
+
+// Send a write request for tech parameters 2
+_12a: CALL "WR_REC" (
+           REQ                      := #Write.TechParm[2].Req,
+           IOID                     := B#16#55,
+           LADDR                    := #T_PQ_AddrWord,
+           RECNUM                   := #Write.TechParm[2].RecordNo,
+           RECORD                   := #T_TechParm2_Ptr,
+           RET_VAL                  := #Write.TechParm[2].Status,
+           BUSY                     := #Write.TechParm[2].Busy);
+
+// Verify we're done writing tech parmameters 2
+      L     #Write.TechParm[2].Status; 
+      L     W#16#7002; 
+      ==I   ; 
+      A     #Write.TechParm[2].Busy; 
+      R     #Write.TechParm[2].Req; 
+
+//--------------------------------------------------------------
+
+// Error trapping
+      L     #Write.TechParm[2].Status; 
+      AW    W#16#8000; // 0x80** are SFC errors
+      L     W#16#8000; 
+      ==I   ; 
+      JCN   _12b; 
+      L     #Write.TechParm[2].RecordNo; 
+      L     3000; //error code for write
+      +I    ; 
+      T     #IO_Status; 
+_12b: NOP   0; 
+
+NETWORK
+TITLE =WRITE TECH PARAMETERS 3
+
+//-------------------------------------------------------
+// Technology parameters 3 WRITE
+//-------------------------------------------------------
+
+// Skip read for DPV0 slaves
+      AN    #CFG_DPV1_WR_EN; 
+      JC    _13b; 
+
+// Write channel to parameter data block to allow for PLC write
+// Byte 0-3 form the preamble of the data
+// Byte 0 is the coordination:
+//  - 0x20 writing via channel C1 (PLC)
+//  - 0x30 writing via channel C2 (PC)
+//  - 0x40 writing via device interface
+      A     #Write.TechParm[3].Req; 
+      JCN   _13a; 
+// We cannot open the DB directly by referring to the
+// input parameter so we transfer it to the local stack
+// first and refer to the DB from there
+      L     #I_Parm_DB; // Load user DB nbr
+      T     #T_Parm_DB; // Copy to local stack
+      OPN   DB [#T_Parm_DB]; // Open the parameter DB
+      L     B#16#20; // Load channel nbr for PLC control
+      T     DBB  138; // Copy to DBB138 (parms2)3
+
+// Send a write request for tech parameters 3
+_13a: CALL "WR_REC" (
+           REQ                      := #Write.TechParm[3].Req,
+           IOID                     := B#16#55,
+           LADDR                    := #T_PQ_AddrWord,
+           RECNUM                   := #Write.TechParm[3].RecordNo,
+           RECORD                   := #T_TechParm3_Ptr,
+           RET_VAL                  := #Write.TechParm[3].Status,
+           BUSY                     := #Write.TechParm[3].Busy);
+
+// Verify we're done writing tech parms 3
+      L     #Write.TechParm[3].Status; 
+      L     W#16#7002; 
+      ==I   ; 
+      A     #Write.TechParm[3].Busy; 
+      R     #Write.TechParm[3].Req; 
+
+//--------------------------------------------------------------
+
+// Error trapping for tech.parms.2 and 3
+      L     #Write.TechParm[3].Status; 
+      AW    W#16#8000; // 0x80** are SFC errors
+      L     W#16#8000; 
+      ==I   ; 
+      JCN   _13b; 
+      L     #Write.TechParm[3].RecordNo; 
+      L     3000; // Error code for write
+      T     #IO_Status; 
+_13b: NOP   0; 
+
+NETWORK
+TITLE =INDICATE PROFIBUS I/O FAILURE(S)
+//Typically, with an active communication problem related to Profibus, we already 
+//wrote the soft starter alarm flag. This may be combined with a general fault 
+//flag outside this FB.
+// --- Accept manual reset ---
+      A     #I_FaultReset; 
+      R     #IO_DataFault; // Clear the comms fault
+
+// --- Test: set the alarm, await manual reset ---
+// We need to SET the alarm flag since the status only changes
+// to 0x80** cyclically, depending on the read/write state.
+      L     #IO_Status; // At least one comms problem reported
+      L     0; 
+      <>I   ; 
+      S     #IO_DataFault; // Set the comms fault
+
+END_FUNCTION_BLOCK
+
