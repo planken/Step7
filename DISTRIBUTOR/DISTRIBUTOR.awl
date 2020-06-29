@@ -1,11 +1,11 @@
-FUNCTION_BLOCK "DISTR 2.6"
+FUNCTION_BLOCK "DISTR 2.7"
 TITLE =Distributor control FM350-1
 //Distributor control for Hi-Pro Olds for use with S7 FM350-1 counter and 
 //Simatic counter control function.
 AUTHOR : STP
 FAMILY : Motor
 NAME : Distr
-VERSION : 2.6
+VERSION : 2.7
 
 
 VAR_INPUT
@@ -51,6 +51,7 @@ VAR
    Init_busy : BOOL ;	//Running initialization
    HomeCountFwd : INT ;	//Encoder count where home pulse is expected for forward movement
    HomeCountRev : INT ;	//Encoder count where home pulse is expected for reverse movement
+   Deadband_Home : INT  := 10;	//Deadband for CW/CCW home index
    Deadband_Searching : INT  := 10;	//Deadband while searching (try to keep as low as possible)
    Deadband_PosAchd : INT  := 10;	//Deadband once position achieved (max disturbance before losing position)
    PreActPreset : INT  := 25;	//Preact value (must exceed deadband for jogging to function)
@@ -82,6 +83,8 @@ VAR
   OK_to_start : BOOL ;	//Motor OK to start
   Exec_init : BOOL ;	//Execute initalization run to detect encoder Z pulse
   Exec_pls : BOOL ;	//***Not used***
+  MotorRunFwd_aux : BOOL ;	//Internal use
+  MotorRunRev_aux : BOOL ;	//Internal use
   Count_bias : INT ;	//Bias to be applied to raw count value from counter
   Target : INT ;	//Encoder count of reqd bin from lookup table
   TargetError : INT ;	//Signed count difference to target
@@ -109,6 +112,8 @@ VAR
   T_JogRev : "TON";	//Manual mode jog for reverse motion
   T_Init_dly : "TON";	//Init cycle minimum run time
   T_Init_TO : "TON";	//Init cycle timeout
+  T_Fwd_off_dly : "TOF";	
+  T_Rev_off_dly : "TOF";	
 END_VAR
 VAR_TEMP
   LoopCount : INT ;	
@@ -118,6 +123,11 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Comments
+//v2.7:  - Changed instance data.
+//       - Fixed immediate motor reversal by using separate timers. The original 
+//         single backspin timer did not interrupt the OK to start.
+//       - Added separate deadband value for the home index proxy to prevent
+//         nuisance index faults.
 //v2.6:  - No instance data changes.
 //       - Important change to applying the bias. Apply a modulo to the 
 //         resulting biased counter value to ensure the range -2540..+2540.
@@ -398,7 +408,7 @@ TITLE =Calibration - Execute from user request
       S     #Exec_home_cal; 
       R     #UserConfig.Cal_req; 
 NETWORK
-TITLE =Calibratin - Indicate cal running
+TITLE =Calibration - Indicate cal running
 
       A     #Exec_home_cal; 
       =     #UserConfig.Cal_busy; 
@@ -952,16 +962,18 @@ NETWORK
 TITLE =Indicate in CW home index range
 //v2.45: This indicates whether we are within home index range for the CW counter 
 //value.
+//26Jul16: (STP) v2.7: Added separate deadband for home index.
       L     #IndexErrorCW_abs; 
-      L     #Deadband; 
+      L     #UserConfig.Deadband_Home; 
       <I    ; 
       =     #IndexRangeCW; 
 NETWORK
-TITLE =Indicate in CW home index range
+TITLE =Indicate in CCW home index range
 //v2.45: This indicates whether we are within home index range for the CCW 
 //counter value.
+//26Jul16: (STP) v2.7: Added separate deadband for home index.
       L     #IndexErrorCCW_abs; 
-      L     #Deadband; 
+      L     #UserConfig.Deadband_Home; 
       <I    ; 
       =     #IndexRangeCCW; 
 NETWORK
@@ -1251,6 +1263,7 @@ TITLE =Energize forward contactor
 //09Feb16: (STP) v2.45: Consolidated two networks.
 //04Jun16: (STP) v2.5: Run forward during the initialization.
 //29Jun16: (STP) v2.6: Removed test for initialization.
+//26Jul16: (STP) v2.7: Added off delay timers to prevent immediate reversal.
       A(    ; 
       AN    #Manual; 
       AN    #PosAchd_internal; 
@@ -1268,13 +1281,16 @@ TITLE =Energize forward contactor
       )     ; 
       AN    #MotorRunRev; 
       A     #OK_to_start; 
+      AN    #T_Rev_off_dly.Q; 
       =     #MotorRunFwd; 
+      =     #MotorRunFwd_aux; 
 NETWORK
 TITLE =Energize reverse contactor
 //22Jan16: v2.43: Prohibit energizing contactors without enable signal.
 //09Feb16: (STP) v2.45: Consolidated two networks.
 //04Jun16: (STP) v2.5: Run forward during the initialization.
 //29Jun16: (STP) v2.6: Removed test for initialization.
+//26Jul16: (STP) v2.7: Added off delay timers to prevent immediate reversal.
       A(    ; 
       AN    #Manual; 
       AN    #PosAchd_internal; 
@@ -1292,7 +1308,33 @@ TITLE =Energize reverse contactor
       )     ; 
       AN    #MotorRunFwd; 
       A     #OK_to_start; 
+      AN    #T_Fwd_off_dly.Q; 
       =     #MotorRunRev; 
+      =     #MotorRunRev_aux; 
+NETWORK
+TITLE =Forward off delay
+//26Jul16: (STP) v2.7: Added off delay timers to prevent immediate reversal. The 
+//original single backspin timer did not interrupt the OK to start.
+      A     #MotorRunFwd_aux; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Fwd_off_dly (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.CoastStopTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Forward off delay
+//26Jul16: (STP) v2.7: Added off delay timers to prevent immediate reversal. The 
+//original single backspin timer did not interrupt the OK to start.
+      A     #MotorRunRev_aux; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Rev_off_dly (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.CoastStopTime);
+
+      NOP   0; 
 NETWORK
 TITLE =Clear first scan
 
