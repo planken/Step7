@@ -1,10 +1,11 @@
-FUNCTION_BLOCK "StartsPerHour v1.1"
+FUNCTION_BLOCK "StartsPerHour v1.2"
 TITLE =Motor starts per hour
+//v1.2: 19Nov15: Do not count starts if max value is 0.
 //v1.1: 27Aug15 (STP): Added backspin timer. Signal OK for either backspin timer 
 //as well as start counter if motor is running.
 //v1.0: 17Aug15 (STP): Monitor starts per hour.
 AUTHOR : STP
-VERSION : 1.0
+VERSION : 1.2
 
 
 VAR_INPUT
@@ -59,6 +60,11 @@ TITLE =Increment motor start counter
 //With each start, increment the start counter.
       A     #Running; 
       FP    #Start_pls; 
+      A(    ; 
+      L     #Starts_hr; 
+      L     0; 
+      >I    ; 
+      )     ; 
       JNB   _002; 
       L     #Start_count; 
       L     1; 
