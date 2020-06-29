@@ -1,0 +1,1236 @@
+FUNCTION_BLOCK "DISTR 2.42"
+TITLE =Distributor control FM350-1
+//Distributor control for Hi-Pro Olds for use with S7 FM350-1 counter and 
+//Simatic counter control function.
+AUTHOR : STP
+FAMILY : Motor
+NAME : Distr
+VERSION : 2.4
+
+
+VAR_INPUT
+  Lookup_DB : BLOCK_DB ;	//Distributor lookup table (spout v. encoder data)
+  MoveEnable : BOOL ;	//Enable distributor movement
+  EmergencyStop : BOOL ;	//Emergency stop input
+  HomeIndexProxy : BOOL ;	//Hardware proxy for home position
+  MotorStatusFwd : BOOL ;	//Contactor status for FORWARD
+  MotorStatusRev : BOOL ;	//Contactor status for REVERSE
+  FaultReset : BOOL ;	//Clear alarms
+  FM_count : INT ;	//Current encoder value
+  Equip_SP : INT ;	//Requested equipment number to position to
+END_VAR
+VAR_OUTPUT
+  EquipNbrCurrent : INT ;	//Equip Nbr distributor is currrently at
+  PositionAchieved : BOOL ;	//Set when distributor settled on requested equip nbr
+  MotorRunning : BOOL ;	//Contactor coil engaged, motor running FWD or REV
+  MotorRunFwd : BOOL ;	//Energize forward contactor coil
+  MotorRunRev : BOOL ;	//Energize reverse contactor coil
+END_VAR
+VAR_IN_OUT
+  Count_actual : INT ;	//Biased counter value
+  SeekHome : BOOL ;	//Reset and re-align
+  MotorStartFault : BOOL ;	//Contactor could not energize in allotted time
+  PositioningFault : BOOL ;	//Positioning timed out
+  HomeIndexFault : BOOL ;	//Home index pulse encountered in unexpected location
+  SelectionFault : BOOL ;	//Invalid silo requested
+  GeneralFault : BOOL ;	//Signal to WinCC any other fault is active
+END_VAR
+VAR
+  PreactRange : BOOL ;	//Current encoder count within preact range
+  ResetModeOn : BOOL ;	//***Not used***
+  JogRqd : BOOL ;	//Jog if not in position
+  Running_aux : BOOL ;	//Running status (internal)
+  AtPreactPulse : BOOL ;	//Motor stopped within preact range from target
+  CoastPulse : BOOL ;	//Motor just stopped in Rev direction
+  HomePulse : BOOL ;	//Signal distributor went through calibration positon
+  BinSP_Valid : BOOL ;	//Requested bin is valid value
+  GoForward : BOOL ;	//Shortest path for target is forward
+  GoReverse : BOOL ;	//Shortest path for target is reverse
+  PosAchd_Tmp : BOOL ;	//Unfiltered "pos achieved" status
+  HomeIndexPulse : BOOL ;	//Pulse for hime index pulse detection
+  New_SP : BOOL ;	//New setpoint was requested
+  Count_bias : INT ;	//Bias to be applied to raw count value from counter
+  PosTgt : INT ;	//Encoder count of reqd bin from lookup table
+  PosTgt_UL : INT ;	//Position target upper limit
+  PosTgt_LL : INT ;	//Position target lower limit
+  PreAct : INT  := 47;	//Preact value, corrected
+  Preact_UL : INT ;	//Preact value upper limit
+  Preact_LL : INT ;	//Preact value lower limit
+  TgtError_Abs : INT ;	//Absolute count difference to target
+  TgtError_Signed : INT ;	//Signed count difference to target
+  PosTgt_UL_Tmp : INT ;	//Position target UL intermediate value
+  PosTgt_LL_Tmp : INT ;	//Position tagret LL intermediate value
+  Preact_UL_Tmp : INT ;	//Preact lower limit intermediate value
+  Preact_LL_Tmp : INT ;	//Preact upper limit intermediate value
+  PreactOffCount : INT ;	//Used for auto preact adjustment
+  Equip_SP_prev : INT ;	//Previous equipment number requested
+  Deadband : INT ;	//Actual deadband used
+  HomeCountFwd_LL : INT ;	
+  HomeCountFwd_UL : INT ;	
+  HomeCountRev_LL : INT ;	
+  HomeCountRev_UL : INT ;	
+  LastIndex : STRUCT 	
+   Fwd : ARRAY  [1 .. 3 ] OF INT ;	
+   Rev : ARRAY  [1 .. 3 ] OF INT ;	
+  END_STRUCT ;	
+  T_M : "TON";	//Motor contactor response timer
+  T_Pos : "TON";	//Positioning timer
+  T_PosAchd : "TON";	//Position achieved delay
+  T_Coast_stop : "TON";	//Motor coast stop timer
+  T_Jog : "TON";	
+  HomeCountFwd : INT ;	//Encoder count where home pulse is expected for forward movement
+  HomeCountRev : INT ;	//Encoder count where home pulse is expected for reverse movement
+  Deadband_Searching : INT ;	//Deadband while searching
+  Deadband_PosAchd : INT ;	//Deadband once position achieved
+  PreActPreset : INT ;	//Preact value (must exceed deadband for jogging to function)
+  CoastStopTime : TIME ;	//Distance to stop in encoder counts
+  MotorFaultTime : TIME ;	//Max contactor response time in s/10
+  PositionFaultTime : TIME ;	//Max time allowed for positioning process before timeout occurs
+  PosAchdDly : TIME ;	//Delay in s/10 before signalling "pos achieved"
+  UseHomeIndexProxy : BOOL ;	//0=no home proxy; 1=home proxy
+  NewBin_SeekHome : BOOL ;	//Seek home with each new bin request?
+  Exec_home_cal : BOOL ;	//Execute calibration of home position
+  Home_cal_pls : BOOL ;	//Calibration pulse
+END_VAR
+VAR_TEMP
+  LoopCount : INT ;	
+  TempInt : INT ;	
+  Bin_GT_0 : BOOL ;	
+  HomeIndexOK : BOOL ;	
+  Exec_home_cal_OS : BOOL ;	
+  Fault_reset_2 : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Comments
+//v2.42: Auto clear faults at start of calibration (more user friendly).
+//v2.41: Don't run position timeout timer during HomeIndexFault.
+//v2.4:  Replace integer-based timers with TON SFB4 calls.
+//       Added a variable counter bias (external to this FB).
+//       Added a home index test, manual or with each new bin setpoint.
+//       Added home index calibration (external to this FB) to correct bias
+//         after removal/replacement of encoder.
+//       Cleaned up original code, removing unused addresses.
+//       Cleaned up FB interface. Several values now written directly to instance
+//         datablock in calling routine.
+//       Changed new setpoint detection. Lookup table now read with each change.
+//       With "no bin" or invalid setpoint current target retained.
+//       Added coast timer.
+//v2.3:  Use separate lookup DB.
+//v2.2:  Always load preact value. Improved deadband and preact range 
+//calculations. No interface changes from v2.2.
+//v2.1:  Suppress selection faults if coming from 0-bin. No interface changes.
+//v2.0:  Rewrite and improvements of original code.
+//
+//Note: this code has been properly documented for all those lazy programmers 
+//that are unwilling or unable to understand someone else's code. Leave the back 
+//seat, take the wheel and drive this thing.
+
+
+NETWORK
+TITLE =Apply counter bias
+//Avoid the use of LOAD_DIRECT. The encoder still issues a Z rollover at the same 
+//physical position, causing a loss of position. Instead, we bias the FM encoder 
+//count value by the amount needed.
+//
+//The encoder will count 2540 pulses between -2540..+2540 depending on rotation.
+//
+//Compensate for under/overflow:
+//  - If the biased value < 0 we correct by adding 2540.
+//  - If the biased value >= 2540 we correct by subtracting 2540.
+//  This ensures the biased counter value is always in the range 0-2540.
+//
+//21Oct15: (STP) Moved external code inside this FB.
+      L     #FM_count; 
+      L     #Count_bias; 
+      +I    ; 
+      T     #Count_actual; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #Count_actual; 
+      L     L#0; 
+      <I    ; 
+      )     ; 
+      JNB   _001; 
+      L     #Count_actual; 
+      L     2540; 
+      +I    ; 
+      T     #Count_actual; 
+_001: NOP   0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #Count_actual; 
+      L     2540; 
+      >=I   ; 
+      )     ; 
+      JNB   _002; 
+      L     #Count_actual; 
+      L     2540; 
+      -I    ; 
+      T     #Count_actual; 
+_002: NOP   0; 
+NETWORK
+TITLE =Calibrate on home index
+//The built-in LOAD_DIRECT function of the FM350-1 will result in the encoder 
+//physically still signalling a Z roll-over to the FM350-1, resulting in a loss 
+//of position. Therefore, it is safer to modify the counter bias.
+//
+//During the calibration we force a regular seek home cycle. (This uses all the 
+//existing contactor control.)
+//
+//v2.42: Transfer the calibration start to a TEMP bool to allow auto clearing 
+//faults that would otherwise interfere with the calibration. (This did not 
+//require reloading the instance data block.)
+      A     #UseHomeIndexProxy; 
+      A     #Exec_home_cal; 
+      FP    #Home_cal_pls; 
+      S     #SeekHome; 
+      =     #Exec_home_cal_OS; 
+NETWORK
+TITLE =Combine fault reset requests
+//v2.42: At the start of a calibration we also clear faults to allow motor 
+//movement.
+      O     #Exec_home_cal_OS; 
+      O     #FaultReset; 
+      =     #Fault_reset_2; 
+NETWORK
+TITLE =Finish calbration mode when proxy detected
+//We finish the calibration once the proxy has been detected. We calculate the 
+//new bias to be applied to obtain the desired encoder count value for the home 
+//index.
+      A     #UseHomeIndexProxy; 
+      A     #Exec_home_cal; 
+      A     #HomePulse; 
+      JNB   _003; 
+      L     #HomeCountFwd; 
+      L     #FM_count; 
+      -I    ; 
+      T     #Count_bias; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_003: A     BR; 
+      R     #Exec_home_cal; 
+NETWORK
+TITLE =Exit calibration without proxy option
+//When the home proxy option is not enabled we do not allow a calibration to be 
+//executed.
+      AN    #UseHomeIndexProxy; 
+      R     #Exec_home_cal; 
+NETWORK
+TITLE =Exit calibration mode on timeouot
+//While the timeout is active we cannot execute a calibration. We do not clear 
+//the home seek request.
+      A     #Exec_home_cal; 
+      A     #PositioningFault; 
+      R     #Exec_home_cal; 
+NETWORK
+TITLE =Clear seek home cycle
+//If we have no valid setpoint (SP = 0) we do not want to seek home. Except 
+//during a forced calibration cycle.
+      AN    #Exec_home_cal; 
+      A     #SeekHome; 
+      A     #BinSP_Valid; 
+      AN    #Bin_GT_0; 
+      R     #SeekHome; 
+NETWORK
+TITLE =New setpoint detection
+//When we detect a change in setpoint, we may execute the bin lookup.
+      L     #Equip_SP; 
+      L     #Equip_SP_prev; 
+      <>I   ; 
+      =     #New_SP; 
+NETWORK
+TITLE =Indicate we have a valid bin > 0
+//Used in various networks.
+      L     #Equip_SP; 
+      L     0; 
+      >I    ; 
+      =     #Bin_GT_0; 
+NETWORK
+TITLE =Indicate motor running
+//Indicate to WinCC that the motor is running forward or reverse.
+//
+//(The "aux" is there because we need to read this status as well, and it is 
+//defined as an output.)
+      O     #MotorStatusFwd; 
+      O     #MotorStatusRev; 
+      =     #MotorRunning; 
+      =     #Running_aux; 
+NETWORK
+TITLE =Motor start fault - Monitor response time
+//When the command is given to run forward or reverse but no coil status is 
+//registered, we start the timeout count. We can use a single accumulator for 
+//both directions since these are mutually exclusive.
+      A(    ; 
+      A     #MotorRunFwd; 
+      AN    #MotorStatusFwd; 
+      O     ; 
+      A     #MotorRunRev; 
+      AN    #MotorStatusRev; 
+      )     ; 
+      AN    #MotorStartFault; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_M (
+           IN                       := L      5.0,
+           PT                       := #MotorFaultTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Motor start fault - Write fault
+//v2.42: Clear the timeout fault at the start of a calibration to permit motor 
+//movement.
+      A     #Fault_reset_2; 
+      R     #MotorStartFault; 
+      A     #T_M.Q; 
+      S     #MotorStartFault; 
+      NOP   0; 
+NETWORK
+TITLE =Positioning timeout - Monitor positioning time
+//This occurs when the requested position cannot be found within the time
+//alotted. Do not test for contactor status.
+//
+//06Oct15: (STP) Version 2.4 beta 3 - Also declare positioning fault during home 
+//seek cycle in case we fail to detect the home pulse.
+//15Jan16: (STP) Version 2.4 - Don't run timer during HomeIndexFault.
+      A(    ; 
+      AN    #PositionAchieved; 
+      AN    #SeekHome; 
+      A     #BinSP_Valid; 
+      O     #SeekHome; 
+      )     ; 
+      AN    #PositioningFault; 
+      AN    #HomeIndexFault; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Pos (
+           IN                       := L      5.0,
+           PT                       := #PositionFaultTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Positioning timeout - Write fault
+//v2.42: Clear the timeout fault at the start of a calibration to permit motor 
+//movement.
+      A     #Fault_reset_2; 
+      R     #PositioningFault; 
+      A     #T_Pos.Q; 
+      S     #PositioningFault; 
+      NOP   0; 
+NETWORK
+TITLE =Selection fault - Detect invalid equipment setpoint
+//When the bin lookup code did not return a positive result we alert the 
+//operator.
+      A(    ; 
+      O     #Fault_reset_2; 
+      O     #SeekHome; 
+      O     #BinSP_Valid; 
+      )     ; 
+      R     #SelectionFault; 
+      AN    #BinSP_Valid; 
+      A     #Bin_GT_0; 
+      S     #SelectionFault; 
+      NOP   0; 
+NETWORK
+TITLE =Home index - Detect home index proxy
+
+      A     #UseHomeIndexProxy; 
+      A     #HomeIndexProxy; 
+      FP    #HomeIndexPulse; 
+      =     #HomePulse; 
+NETWORK
+TITLE =Home index - Record last home index values (forward)
+//Store the last 3 encouder counts for forward and reverse for analysis.
+      A     #HomePulse; 
+      A     #MotorStatusFwd; 
+      =     L      5.0; 
+      A     L      5.0; 
+      JNB   _004; 
+      L     #LastIndex.Fwd[2]; 
+      T     #LastIndex.Fwd[3]; 
+_004: NOP   0; 
+      A     L      5.0; 
+      JNB   _005; 
+      L     #LastIndex.Fwd[1]; 
+      T     #LastIndex.Fwd[2]; 
+_005: NOP   0; 
+      A     L      5.0; 
+      JNB   _006; 
+      L     #Count_actual; 
+      T     #LastIndex.Fwd[1]; 
+_006: NOP   0; 
+NETWORK
+TITLE =Home index - Record last home index values (reverse)
+//Store the last 3 encouder counts for forward and reverse for analysis.
+      A     #HomePulse; 
+      A     #MotorStatusRev; 
+      =     L      5.0; 
+      A     L      5.0; 
+      JNB   _007; 
+      L     #LastIndex.Rev[2]; 
+      T     #LastIndex.Rev[3]; 
+_007: NOP   0; 
+      A     L      5.0; 
+      JNB   _008; 
+      L     #LastIndex.Rev[1]; 
+      T     #LastIndex.Rev[2]; 
+_008: NOP   0; 
+      A     L      5.0; 
+      JNB   _009; 
+      L     #Count_actual; 
+      T     #LastIndex.Rev[1]; 
+_009: NOP   0; 
+NETWORK
+TITLE =Home index - Calculate forward deadband
+
+      A     M      0.0; 
+      =     L      5.0; 
+      A(    ; 
+      A     L      5.0; 
+      JNB   _00a; 
+      L     #HomeCountFwd; 
+      L     #Deadband_Searching; 
+      -I    ; 
+      T     #HomeCountFwd_LL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_00a: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #HomeCountFwd_LL; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      JNB   _00b; 
+      L     #HomeCountFwd_LL; 
+      L     2540; 
+      +I    ; 
+      T     #HomeCountFwd_LL; 
+_00b: NOP   0; 
+      A(    ; 
+      A     L      5.0; 
+      JNB   _00c; 
+      L     #HomeCountFwd; 
+      L     #Deadband_Searching; 
+      +I    ; 
+      T     #HomeCountFwd_UL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_00c: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #HomeCountFwd_UL; 
+      L     2539; 
+      >I    ; 
+      )     ; 
+      JNB   _00d; 
+      L     #HomeCountFwd_UL; 
+      L     2540; 
+      -I    ; 
+      T     #HomeCountFwd_UL; 
+_00d: NOP   0; 
+NETWORK
+TITLE =Home index - Calculate reverse deadband
+
+      A     M      0.0; 
+      =     L      5.0; 
+      A(    ; 
+      A     L      5.0; 
+      JNB   _00e; 
+      L     #HomeCountRev; 
+      L     #Deadband_Searching; 
+      -I    ; 
+      T     #HomeCountRev_LL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_00e: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #HomeCountRev_LL; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      JNB   _00f; 
+      L     #HomeCountRev_LL; 
+      L     2540; 
+      +I    ; 
+      T     #HomeCountRev_LL; 
+_00f: NOP   0; 
+      A(    ; 
+      A     L      5.0; 
+      JNB   _010; 
+      L     #HomeCountRev; 
+      L     #Deadband_Searching; 
+      +I    ; 
+      T     #HomeCountRev_UL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_010: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #HomeCountRev_UL; 
+      L     2539; 
+      >I    ; 
+      )     ; 
+      JNB   _011; 
+      L     #HomeCountRev_UL; 
+      L     2540; 
+      -I    ; 
+      T     #HomeCountRev_UL; 
+_011: NOP   0; 
+NETWORK
+TITLE =Home index fault - Index out of bounds during forward seek
+//Check if the home index pulse was within the expected range during the forward 
+//seek. If not, alert the operator.
+//Note: for now, seek and cal are done using forward motion only.
+      A     #HomePulse; 
+      A     #MotorStatusFwd; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A(    ; 
+      A(    ; 
+      L     #HomeCountFwd_LL; 
+      L     #HomeCountFwd_UL; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #HomeCountFwd_LL; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #HomeCountFwd_UL; 
+      <=I   ; 
+      )     ; 
+      O     ; 
+      A(    ; 
+      L     #HomeCountFwd_LL; 
+      L     #HomeCountFwd_UL; 
+      >I    ; 
+      )     ; 
+      A(    ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #HomeCountFwd_LL; 
+      >=I   ; 
+      )     ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #HomeCountFwd_UL; 
+      <=I   ; 
+      )     ; 
+      )     ; 
+      )     ; 
+      =     #HomeIndexOK; 
+      A     L      5.0; 
+      AN    #HomeIndexOK; 
+      AN    #Exec_home_cal; 
+      S     #HomeIndexFault; 
+NETWORK
+TITLE =Home index fault - Index out of bounds during reverse seek
+//Check if the home index pulse was within the expected range during the reverse 
+//seek. If not, alert the operator.
+//Note: for now, seek and cal are done using forward motion only.
+      A     #HomePulse; 
+      A     #MotorStatusRev; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A(    ; 
+      A(    ; 
+      L     #HomeCountRev_LL; 
+      L     #HomeCountRev_UL; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #HomeCountRev_LL; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #HomeCountRev_UL; 
+      <=I   ; 
+      )     ; 
+      O     ; 
+      A(    ; 
+      L     #HomeCountRev_LL; 
+      L     #HomeCountRev_UL; 
+      >I    ; 
+      )     ; 
+      A(    ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #HomeCountRev_LL; 
+      >=I   ; 
+      )     ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #HomeCountRev_UL; 
+      <=I   ; 
+      )     ; 
+      )     ; 
+      )     ; 
+      =     #HomeIndexOK; 
+      A     L      5.0; 
+      AN    #HomeIndexOK; 
+      AN    #Exec_home_cal; 
+      S     #HomeIndexFault; 
+NETWORK
+TITLE =Clear home index fault
+//v2.42:  Clear the home index fault at the start of a calibration to permit 
+//motor movement.
+
+      A     #Fault_reset_2; 
+      R     #HomeIndexFault; 
+NETWORK
+TITLE =Write general fault
+//Common fault bit mainly to test for in WinCC.
+
+//---Write combined fault for WinCC--
+
+//This is used in the WinCC object
+//for the distributor so only one
+//tag has to be monitored for changes.
+
+      O     #SelectionFault; 
+      O     #MotorStartFault; 
+      O     #PositioningFault; 
+      O     #HomeIndexFault; 
+
+      =     #GeneralFault; 
+NETWORK
+TITLE =Seek home on new setpoint
+//With this option we can automatically seek home prior to positioning to a new 
+//bin. On detection of the hime index pulse we proceed to the new poisition.
+      A     #NewBin_SeekHome; 
+      A     #New_SP; 
+      A     #BinSP_Valid; 
+      A     #Bin_GT_0; 
+      A     #UseHomeIndexProxy; 
+      S     #SeekHome; 
+      A     #HomePulse; 
+      A     #Running_aux; 
+      R     #SeekHome; 
+      NOP   0; 
+NETWORK
+TITLE =Load preact if not defined
+//The preact value is used from the last bin lookup. If the value is zero we load 
+//the preset supplied by the calling code.
+//14Apr10: (STP) Always calculate preact value.
+//Load preset if zero
+//      L     #PreAct
+//      L     0
+//      ==I   
+//      JCN   _04a
+      L     #PreActPreset; 
+      T     #PreAct; 
+//_04a: NOP   0
+
+NETWORK
+TITLE =Load deadband depending on status
+//Once the distributor position has been achieved, load a wider deadband to 
+//prevent the distributor from re-positioning due to small movements.
+      A(    ; 
+      L     #Deadband_Searching; 
+      T     #Deadband; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A     #PositionAchieved; 
+      JNB   _012; 
+      L     #Deadband_PosAchd; 
+      T     #Deadband; 
+_012: NOP   0; 
+NETWORK
+TITLE =Calculate target upper limit
+//To calculate the upper range of the target we take the POSITION REQUESTED value
+//and add the DEADBAND value, then store this value in UPPER RANGE. IF the value 
+//in UPPER RANGE falls within a value between 0 and 2539 (0 to 360 Deg.), then it 
+//is moved to TARGET UPPER RANGE. If the value of UPPER RANGE is greater than 
+//2539 then the UPPER RANGE is subtracted from 2540 giving us a value between 0 
+//and 2539.
+//eg. If position requested is 2537 and the deadband is 5 then the result would 
+//be 
+//    2542; this result is not in our required range of 0 to 2539. Therefore 
+//    2542 is subtracted from 2540, giving us a result of 2 which is in our 
+//    required range.   
+//
+//To calculate the lower range of the target we take the POSITION REQUESTED value
+//and subtract the DEADBAND value, then store this value in LOWER RANGE. IF the 
+//value in LOWER RANGE falls within a value between 0 and 2539 (0 to 360 Deg.), 
+//then it is moved to TARGET LOWER RANGE. If the value of LOWER RANGE is less 
+//than 0 then the LOWER RANGE is added to 2540 giving us a value between 0 and 
+//2539.
+//eg. If position requested is 3 and the deadband is 5 then the result would be 
+//    -2; this result is not in our required range of 0 to 2539. Therefore  
+//    -2 is added to 2540, giving us a result of 2538 which is in our 
+//    required range.
+      A(    ; 
+      A     #MoveEnable; 
+      AN    #SeekHome; 
+      JNB   _013; 
+      L     #PosTgt; 
+      L     #Deadband; 
+      +I    ; 
+      T     #PosTgt_UL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_013: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #PosTgt_UL; 
+      L     2539; 
+      >I    ; 
+      )     ; 
+      JNB   _014; 
+      L     #PosTgt_UL; 
+      L     2540; 
+      -I    ; 
+      T     #PosTgt_UL; 
+_014: NOP   0; 
+NETWORK
+TITLE =Calculate target lower limit
+//To calculate the upper range of the target we take the POSITION REQUESTED value
+//and add the DEADBAND value, then store this value in UPPER RANGE. IF the value 
+//in UPPER RANGE falls within a value between 0 and 2539 (0 to 360 Deg.), then it 
+//is moved to TARGET UPPER RANGE. If the value of UPPER RANGE is greater than 
+//2539 then the UPPER RANGE is subtracted from 2540 giving us a value between 0 
+//and 2539.
+//eg. If position requested is 2537 and the deadband is 5 then the result would 
+//be 
+//    2542; this result is not in our required range of 0 to 2539. Therefore 
+//    2542 is subtracted from 2540, giving us a result of 2 which is in our 
+//    required range.   
+//
+//To calculate the lower range of the target we take the POSITION REQUESTED value
+//and subtract the DEADBAND value, then store this value in LOWER RANGE. IF the 
+//value in LOWER RANGE falls within a value between 0 and 2539 (0 to 360 Deg.), 
+//then it is moved to TARGET LOWER RANGE. If the value of LOWER RANGE is less 
+//than 0 then the LOWER RANGE is added to 2540 giving us a value between 0 and 
+//2539.
+//eg. If position requested is 3 and the deadband is 5 then the result would be 
+//    -2; this result is not in our required range of 0 to 2539. Therefore  
+//    -2 is added to 2540, giving us a result of 2538 which is in our 
+//    required range.
+      A(    ; 
+      A     #MoveEnable; 
+      AN    #SeekHome; 
+      JNB   _015; 
+      L     #PosTgt; 
+      L     #Deadband; 
+      -I    ; 
+      T     #PosTgt_LL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_015: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #PosTgt_LL; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      JNB   _016; 
+      L     #PosTgt_LL; 
+      L     2540; 
+      +I    ; 
+      T     #PosTgt_LL; 
+_016: NOP   0; 
+NETWORK
+TITLE =Indicate preliminary position achieved
+//Output bit if position, between tolerance values, is achieved.
+//
+//While selecting "no bin" the target is not reloaded thus the current position 
+//remains "achieved".
+      A     #BinSP_Valid; 
+      AN    #SeekHome; 
+      A(    ; 
+      A(    ; 
+      L     #PosTgt_LL; 
+      L     #PosTgt_UL; 
+      >I    ; 
+      )     ; 
+      A(    ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #PosTgt_UL; 
+      <I    ; 
+      )     ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #PosTgt_LL; 
+      >I    ; 
+      )     ; 
+      )     ; 
+      O     ; 
+      A(    ; 
+      L     #PosTgt_LL; 
+      L     #PosTgt_UL; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #PosTgt_UL; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #PosTgt_LL; 
+      >I    ; 
+      )     ; 
+      )     ; 
+      =     #PosAchd_Tmp; 
+NETWORK
+TITLE =Indicate position achieved
+//After a small delay without disturbances, indicate position achieved.
+      A(    ; 
+      A     #PosAchd_Tmp; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_PosAchd (
+           IN                       := L      5.0,
+           PT                       := #PosAchdDly);
+
+      A     BR; 
+      )     ; 
+      A     #T_PosAchd.Q; 
+      =     #PositionAchieved; 
+NETWORK
+TITLE =Return equipment number once in position
+//Return the actual equipment number once the position has been achieved.
+      A(    ; 
+      L     0; 
+      T     #EquipNbrCurrent; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A     #PositionAchieved; 
+      JNB   _017; 
+      L     #Equip_SP; 
+      T     #EquipNbrCurrent; 
+_017: NOP   0; 
+NETWORK
+TITLE =Calculate preact upper limit
+//To calculate the upper range of the Preact we take the POSITION REQUESTED value
+//and add the PRE ACT value, then store this value in UPPER RANGE PREACT. IF the 
+//value in UPPER RANGE PREACT falls within a value between 0 and 2539 (0 to 360 
+//Deg.), then it is moved to PREACT UPPER RANGE. If the value of UPPER RANGE is 
+//greater than 2539 then the UPPER RANGE PREACT is subtracted from 2540 giving us 
+//a value between 0 and 2539.
+//eg. If position requested is 2537 and the Preact is 5 then the result would be 
+//    2542; this result is not in our required range of 0 to 2539. Therefore  
+//    2542 is subtracted from 2540, giving us a result of 2 which is in our 
+//    required range.   
+//
+//To calculate the lower range of the target we take the POSITION REQUESTED value
+//and subtract the PREACT value, then store this value in LOWER RANGE PREACT. IF 
+//the value in LOWER RANGE PREACT falls within a value between 0 and 2539 (0 to 
+//360 Deg.), then it is moved to PREACT LOWER RANGE. If the value of LOWER RANGE 
+//is less than 0 then the LOWER RANGE PREACT is added to 2540 giving us a value 
+//between 0 and 2539.
+//eg. If position requested is 3 and the PREACT is 5 then the result would be 
+//    -2; this result is not in our required range of 0 to 2539. Therefore  
+//    -2 is added to 2540, giving us a result of 2538 which is in our 
+//    required range.   
+      A(    ; 
+      A     #MoveEnable; 
+      AN    #SeekHome; 
+      JNB   _018; 
+      L     #PosTgt; 
+      L     #PreAct; 
+      +I    ; 
+      T     #Preact_UL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_018: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Preact_UL; 
+      L     2539; 
+      >I    ; 
+      )     ; 
+      JNB   _019; 
+      L     #Preact_UL; 
+      L     2540; 
+      -I    ; 
+      T     #Preact_UL; 
+_019: NOP   0; 
+NETWORK
+TITLE =Calculate preact lower limit
+//To calculate the upper range of the Preact we take the POSITION REQUESTED value
+//and add the PRE ACT value, then store this value in UPPER RANGE PREACT. IF the 
+//value in UPPER RANGE PREACT falls within a value between 0 and 2539 (0 to 360 
+//Deg.), then it is moved to PREACT UPPER RANGE. If the value of UPPER RANGE is 
+//greater than 2539 then the UPPER RANGE PREACT is subtracted from 2540 giving us 
+//a value between 0 and 2539.
+//eg. If position requested is 2537 and the Preact is 5 then the result would be 
+//    2542; this result is not in our required range of 0 to 2539. Therefore  
+//    2542 is subtracted from 2540, giving us a result of 2 which is in our 
+//    required range.   
+//
+//To calculate the lower range of the target we take the POSITION REQUESTED value
+//and subtract the PREACT value, then store this value in LOWER RANGE PREACT. IF 
+//the value in LOWER RANGE PREACT falls within a value between 0 and 2539 (0 to 
+//360 Deg.), then it is moved to PREACT LOWER RANGE. If the value of LOWER RANGE 
+//is less than 0 then the LOWER RANGE PREACT is added to 2540 giving us a value 
+//between 0 and 2539.
+//eg. If position requested is 3 and the PREACT is 5 then the result would be 
+//    -2; this result is not in our required range of 0 to 2539. Therefore  
+//    -2 is added to 2540, giving us a result of 2538 which is in our 
+//    required range.   
+      A(    ; 
+      A     #MoveEnable; 
+      AN    #SeekHome; 
+      JNB   _01a; 
+      L     #PosTgt; 
+      L     #PreAct; 
+      -I    ; 
+      T     #Preact_LL; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_01a: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Preact_LL; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      JNB   _01b; 
+      L     #Preact_LL; 
+      L     2540; 
+      +I    ; 
+      T     #Preact_LL; 
+_01b: NOP   0; 
+NETWORK
+TITLE =Check if in preact range
+//Stop motor the preact counts before it reaches the target.
+//This takes into account motor coasting.
+      AN    #SeekHome; 
+      A(    ; 
+      A(    ; 
+      L     #Preact_LL; 
+      L     #Preact_UL; 
+      >I    ; 
+      )     ; 
+      A(    ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #Preact_UL; 
+      <I    ; 
+      )     ; 
+      O(    ; 
+      L     #Count_actual; 
+      L     #Preact_LL; 
+      >I    ; 
+      )     ; 
+      )     ; 
+      O     ; 
+      A(    ; 
+      L     #Preact_LL; 
+      L     #Preact_UL; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #Preact_UL; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #Count_actual; 
+      L     #Preact_LL; 
+      >I    ; 
+      )     ; 
+      )     ; 
+      =     #PreactRange; 
+NETWORK
+TITLE =Seal preact range occurence
+//When initially in the preact range , store the error value.
+      A     M      0.0; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A     #PreactRange; 
+      AN    #AtPreactPulse; 
+      JNB   _01c; 
+      L     #Count_actual; 
+      T     #PreactOffCount; 
+_01c: NOP   0; 
+      A     L      5.0; 
+      AN    #New_SP; 
+      A(    ; 
+      O     #PreactRange; 
+      O     #AtPreactPulse; 
+      )     ; 
+      =     #AtPreactPulse; 
+NETWORK
+TITLE =Position error and direction
+//The signed error determines the correction needed to achieve target position.
+      L     #PosTgt; 
+      L     #Count_actual; 
+      -I    ; 
+      T     #TgtError_Signed; 
+      ITD   ; 
+      DTR   ; 
+      ABS   ; 
+      TRUNC ; 
+      T     #TgtError_Abs; 
+
+NETWORK
+TITLE =Motor coast stop timer
+//Ensure that the motor has come to a full stop before jogging.
+      AN    #MotorStatusFwd; 
+      AN    #MotorStatusRev; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Coast_stop (
+           IN                       := L      5.0,
+           PT                       := #CoastStopTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Jog motor
+//Jog the motor once in preact range but not yet in position. Jog for short time 
+//only. Trigger with the off delay and latch with the jog required contact. Run 
+//while the jog timer has not expired yet.
+      A     #BinSP_Valid; 
+      A     #PreactRange; 
+      AN    #PosAchd_Tmp; 
+      A(    ; 
+      O     #T_Coast_stop.Q; 
+      O     #JogRqd; 
+      )     ; 
+      AN    #T_Jog.Q; 
+      =     #JogRqd; 
+NETWORK
+TITLE =Motor jog timer
+//Start the jog timer to interrupt jogging once the timer expires.
+      A     #JogRqd; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Jog (
+           IN                       := L      5.0,
+           PT                       := T#150MS);
+
+      NOP   0; 
+NETWORK
+TITLE =Calculate actual preact count
+
+      A     #PreactRange; 
+      A(    ; 
+      O     #JogRqd; 
+      O     #PosAchd_Tmp; 
+      )     ; 
+      AN    #CoastPulse; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A     #GoReverse; 
+      JNB   _01d; 
+      L     #PreactOffCount; 
+      L     #Count_actual; 
+      -I    ; 
+      T     #PreactOffCount; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_01d: A     BR; 
+      S     #CoastPulse; 
+      A     L      5.0; 
+      A     #GoForward; 
+      JNB   _01e; 
+      L     #Count_actual; 
+      L     #PreactOffCount; 
+      -I    ; 
+      T     #PreactOffCount; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_01e: A     BR; 
+      S     #CoastPulse; 
+NETWORK
+TITLE =Check if shortest path is clockwise
+
+      A(    ; 
+      L     #TgtError_Signed; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #TgtError_Abs; 
+      L     1269; 
+      >I    ; 
+      )     ; 
+      O     ; 
+      A(    ; 
+      L     #TgtError_Signed; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      A(    ; 
+      L     #TgtError_Abs; 
+      L     1269; 
+      <=I   ; 
+      )     ; 
+      O     #SeekHome; 
+      =     #GoForward; 
+NETWORK
+TITLE =Check if shortest path is counter-clockwise
+
+      A(    ; 
+      A(    ; 
+      L     #TgtError_Signed; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #TgtError_Abs; 
+      L     1269; 
+      <I    ; 
+      )     ; 
+      O     ; 
+      A(    ; 
+      L     #TgtError_Signed; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      A(    ; 
+      L     #TgtError_Abs; 
+      L     1269; 
+      >I    ; 
+      )     ; 
+      )     ; 
+      AN    #SeekHome; 
+      =     #GoReverse; 
+NETWORK
+TITLE =Energize forward contactor
+//Select if forward direction is required.
+      AN    #EmergencyStop; 
+      AN    #PosAchd_Tmp; 
+      A(    ; 
+      A     #Bin_GT_0; 
+      A     #MoveEnable; 
+      O     #SeekHome; 
+      )     ; 
+      A     #GoForward; 
+      A(    ; 
+      O     #JogRqd; 
+      ON    #PreactRange; 
+      )     ; 
+      A(    ; 
+      O     #T_Coast_stop.Q; 
+      O     #MotorRunFwd; 
+      )     ; 
+      AN    #GeneralFault; 
+      AN    #MotorRunRev; 
+      =     #MotorRunFwd; 
+NETWORK
+TITLE =Energize reverse contactor
+
+      AN    #EmergencyStop; 
+      AN    #PosAchd_Tmp; 
+      A     #Bin_GT_0; 
+      AN    #SeekHome; 
+      A     #MoveEnable; 
+      A     #GoReverse; 
+      A(    ; 
+      O     #JogRqd; 
+      ON    #PreactRange; 
+      )     ; 
+      A(    ; 
+      O     #T_Coast_stop.Q; 
+      O     #MotorRunRev; 
+      )     ; 
+      AN    #GeneralFault; 
+      AN    #MotorRunFwd; 
+      =     #MotorRunRev; 
+NETWORK
+TITLE =Prepare lookup
+//When we execute this we have a new bin number to look up. Store the previous 
+//value for the next comparison and prepare the look up. Also clear the preact 
+//and coast booleans.
+      A     #New_SP; 
+      =     L      5.0; 
+      A     L      5.0; 
+      JNB   _01f; 
+      L     #PreactOffCount; 
+      T     #PreAct; 
+_01f: NOP   0; 
+      A     L      5.0; 
+      BLD   102; 
+      R     #AtPreactPulse; 
+      A     L      5.0; 
+      BLD   102; 
+      R     #CoastPulse; 
+      A     L      5.0; 
+      A     #Bin_GT_0; 
+      R     #BinSP_Valid; 
+      A     L      5.0; 
+      AN    #Bin_GT_0; 
+      S     #BinSP_Valid; 
+NETWORK
+TITLE =Lookup encoder target for requested equipment
+//26Mar07: (STP) Replaced all old ladder logic and reduced code by 95% for this 
+//part. Iterate the lookup array to find the desired setpoint and obtain the 
+//encoder count.
+// The lookup DB is expected to have a 32 elements:
+//   Equip_x INT = Equipment nbr or bin nbr
+//   Count_x INT = Corresponding encoder count
+
+      A     #Bin_GT_0; // Only execute on bin > 0
+      A     #New_SP; // Only execute on new setpoint
+      JCN   _x3; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+      OPN   #Lookup_DB; // Open external lookup table
+
+      LAR1  P#0.0; // Point to 1st equipnbr
+      L     26; // Iterate all distr positions
+nxt:  T     #LoopCount; // ===== iteration start =====
+
+      L     DBW [AR1,P#0.0]; // Terminate if DB bin# negative
+      L     0; 
+      <I    ; 
+      JC    _x2; 
+
+      L     DBW [AR1,P#0.0]; // Check for equipnbr match
+      L     #Equip_SP; 
+      ==I   ; 
+      JCN   _x1; // Skip if no match
+
+      L     DBW [AR1,P#2.0]; // Store required encoder position
+      T     #PosTgt; // ..for positioning logic
+      SET   ; 
+      =     #BinSP_Valid; // Indicate all ok, quit
+      JU    _x2; 
+
+_x1:  +AR1  P#4.0; // Increment equip nbr
+
+      L     #LoopCount; 
+      LOOP  nxt; // ===== iteration end =====
+
+// Store the new setpoint to detect a change
+
+_x2:  L     #Equip_SP; 
+      T     #Equip_SP_prev; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+_x3:  NOP   0; 
+END_FUNCTION_BLOCK
+
