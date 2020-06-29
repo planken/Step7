@@ -1,0 +1,357 @@
+FUNCTION_BLOCK "MOTOR v4.3"
+TITLE =Motor with CD and SS sensors
+//Motor control function.
+AUTHOR : splanken
+FAMILY : EQUIP
+NAME : MOTOR
+VERSION : 4.3
+
+
+VAR_INPUT
+  Sensor_options : BYTE ;	//Bits:0=CD;1=SS;2=SS-4B; 3=TD
+  Start_rqd_man : BOOL ;	//Manual mode start request
+  Start_rqd_auto : BOOL ;	//Auto mode start request
+  Manual_mode : BOOL ;	//Manual mode (1=manual; 0=auto)
+  Estop_alarm : BOOL ;	//Emergency stop alarm active
+  Alarm_reset : BOOL ;	//Reset any alarms for this equipment
+  EQ_CD : BOOL ;	//Motor choke detector device
+  EQ_SS : BOOL ;	//Motor speed switch device
+  EQ_TD : BOOL ;	//Equipment takeup detection switch
+  EQ_MS : BOOL ;	//Contactor running status
+  M_off_time : TIME ;	//Delay between starts (0=none)
+  M_max_time : TIME ;	//Contactor maximum response time (0=indefinite)
+  CD_max_time : TIME ;	//Choke detector maximum off time (must be >0 if option enabled)
+  TD_max_time : TIME ;	//Takeup detection maximum off time (must be >0 if option enabled)
+  SS_start_delay : TIME ;	//Speed switch startup delay (must be >0 if option enabled)
+  SS_max_on_time : TIME ;	//Speed switch maximum ON time (must be >0 if option enabled)
+  SS_max_off_time : TIME ;	//Speed switch maximum off time (must be >0 if option enabled)
+END_VAR
+VAR_IN_OUT
+  OK_to_start : BOOL ;	
+  EQ_M : BOOL ;	//Contactor coil signal for run
+  Running : BOOL ;	//Indication for HMI motor running
+  Alarm_M : BOOL ;	//Motor start alarm
+  Alarm_CD : BOOL ;	//Choke detector alarm
+  Alarm_TD : BOOL ;	//Takeup detection alarm
+  Alarm_SS : BOOL ;	//Speed switch alarm
+  Alarm_general : BOOL ;	//General alarm (any active alarm)
+END_VAR
+VAR
+  Off_delay : "TON";	
+  T_SS_start : "TON";	//IEC timer for speed switch start delay
+  T_SS_on : "TON";	//IEC timer for speed switch on time
+  T_SS_off : "TON";	//IEC timer for speed switch off time
+  T_CD : "TON";	//IEC timer for choke detector
+  T_TD : "TON";	
+  T_M : "TON";	//IEC timer for contactor feedback
+  Alarm : STRUCT 	//Alarm structure
+   SS_on : BOOL ;	
+   SS_off : BOOL ;	
+   CD : BOOL ;	
+   TD : BOOL ;	
+   M : BOOL ;	
+  END_STRUCT ;	
+  SS : STRUCT 	
+   Start_dly_done : BOOL ;	//Motor start delay expired for speed switch
+   On_pls : BOOL ;	//Speed switch on pulse
+   Off_pls : BOOL ;	//Speed switch off pulse
+   On_time : TIME ;	//Speed switch current on time
+   Off_time : TIME ;	//Speed switch current off time
+   Last_on_time : TIME ;	//Speed switch last measaured on time
+   Last_off_time : TIME ;	//Speed switch last measured off time
+  END_STRUCT ;	
+  Option : STRUCT 	
+   CD : BOOL ;	
+   TD : BOOL ;	
+   SS : BOOL ;	
+   SS4B : BOOL ;	
+  END_STRUCT ;	
+  Running_last : BOOL ;	
+END_VAR
+VAR_TEMP
+  Off_dly_OK : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Check which options to use
+//v4.3:  11Oct16: Added takeup detection input.
+//       Options: bit 0 = CD sensor
+//                bit 1 = SS sensor (pusle)
+//                bit 2 = SS sensor (4B Whirligig)
+//                bit 3 = TD sensor
+//       Note: Bit 1 & 2 cannot be combined
+//    :  Allow off delay of 0.
+//v4.2:  Intermediate (ignore off delay if time = T#0s)
+//v4.12: 11Oct16: Added additional motor trip detection.
+//v4.11: 17Sep15: Also consider E-stop alarm in ok to start evaluation.
+//v4.1 : 09Mar15: Add off time delay for motor starts and OK to start.
+//v4.0 : 02Mar15: Combined all CD/SS/SS4B options into one generic FB.
+//       Options: bit 0 = CD sensor
+//                bit 1 = SS sensor (pusle)
+//                bit 2 = SS sensor (4B Whirligig)
+//       Note: Bit 1 & 2 cannot be combined
+//v3.0 : 23Feb15: Rewrite using IEC timers for cleaner code.
+// Check bit 0 for CD sensor
+      L     #Sensor_options; 
+      AW    W#16#1; 
+      L     W#16#1; 
+      ==I   ; 
+      =     #Option.CD; // Monitor choke detector
+
+// Check bit 1 for SS sensor
+      L     #Sensor_options; 
+      AW    W#16#2; 
+      L     W#16#2; 
+      ==I   ; 
+      =     #Option.SS; // Monitor pulsating speed switch
+
+// Check bit 2 for SS 4B (stop motion) sensor
+// This option cannot be used with a regular SS sensor
+      L     #Sensor_options; 
+      AW    W#16#4; 
+      L     W#16#4; 
+      ==I   ; 
+      AN    #Option.SS; 
+      =     #Option.SS4B; // Monitor 4B type speed switch
+
+// Check bit 3 for TD sensor
+      L     #Sensor_options; 
+      AW    W#16#8; 
+      L     W#16#8; 
+      ==I   ; 
+      =     #Option.TD; 
+NETWORK
+TITLE =Indicate running
+//Indicate running if we energized the contactor and received the status feedback 
+//from the contactor.
+      A     #EQ_M; 
+      A     #EQ_MS; 
+      =     #Running; 
+NETWORK
+TITLE =Off delay
+
+      AN    #Running; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #Off_delay (
+           IN                       := L      1.0,
+           PT                       := #M_off_time);
+
+      NOP   0; 
+NETWORK
+TITLE =Off delay OK
+
+      O     #Off_delay.Q; 
+      O(    ; 
+      L     #Off_delay.PT; 
+      L     L#0; 
+      <=D   ; 
+      )     ; 
+      =     #Off_dly_OK; 
+NETWORK
+TITLE =Start delay
+//Before monitoring the speed switch input timing we allow the motor to ramp up.
+      A     #Running; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_SS_start (
+           IN                       := L      1.0,
+           PT                       := #SS_start_delay,
+           Q                        := #SS.Start_dly_done);
+
+      NOP   0; 
+NETWORK
+TITLE =Record the last on/off times
+//This is not critical to operation but it helps in setting up proper timing for 
+//this equipment.
+      A     #EQ_SS; 
+      =     L      1.0; 
+      A     L      1.0; 
+      FP    #SS.On_pls; 
+      JNB   _001; 
+      L     #SS.Off_time; 
+      T     #SS.Last_off_time; 
+_001: NOP   0; 
+      A     L      1.0; 
+      FN    #SS.Off_pls; 
+      JNB   _002; 
+      L     #SS.On_time; 
+      T     #SS.Last_on_time; 
+_002: NOP   0; 
+NETWORK
+TITLE =Speed switch time ON
+//Once ramped up, verify the ON time is within the limit (motor can stop with 
+//input active.)
+      A     #SS.Start_dly_done; 
+      A     #EQ_SS; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_SS_on (
+           IN                       := L      1.0,
+           PT                       := #SS_max_on_time,
+           Q                        := #Alarm.SS_on,
+           ET                       := #SS.On_time);
+      NOP   0; 
+NETWORK
+TITLE =Speed switch time off
+//Once ramped up, verify the OFF time is within the limit.
+      A     #SS.Start_dly_done; 
+      AN    #EQ_SS; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_SS_off (
+           IN                       := L      1.0,
+           PT                       := #SS_max_off_time,
+           Q                        := #Alarm.SS_off,
+           ET                       := #SS.Off_time);
+      NOP   0; 
+NETWORK
+TITLE =Speed switch alarm
+//Construction in separate network since TIA Portal does ot have EN/ENO for IEC 
+//timers.
+      A     #Option.SS; 
+      A(    ; 
+      O     #Alarm.SS_on; 
+      O     #Alarm.SS_off; 
+
+      )     ; 
+      S     #Alarm_SS; 
+NETWORK
+TITLE =Speed switch alarm (4B)
+//Construction in separate network since TIA Portal does ot have EN/ENO for IEC 
+//timers.
+      A     #Option.SS4B; 
+      A     #SS.Start_dly_done; 
+      AN    #EQ_SS; 
+      S     #Alarm_SS; 
+NETWORK
+TITLE =Choke detector time
+//Verify the choke detector input is active while running. If not running, this 
+//will not trigger a fault.
+//It could be safer to declare an alarm even when #Running is false. Otherwise, 
+//the motor is allowed to start for the short duration that the choke input is 
+//allowed to be absent. This could be a problem on larger motors under heavy 
+//load.
+      A     #Running; 
+      AN    #EQ_CD; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_CD (
+           IN                       := L      1.0,
+           PT                       := #CD_max_time,
+           Q                        := #Alarm.CD);
+
+      NOP   0; 
+NETWORK
+TITLE =CD alarm
+//Construction in separate network since TIA Portal does ot have EN/ENO for IEC 
+//timers.
+      A     #Option.CD; 
+      A     #Alarm.CD; 
+      S     #Alarm_CD; 
+NETWORK
+TITLE =TD time
+
+      A     #Running; 
+      AN    #EQ_TD; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_TD (
+           IN                       := L      1.0,
+           PT                       := #TD_max_time,
+           Q                        := #Alarm.TD);
+
+      NOP   0; 
+NETWORK
+TITLE =TD alarm
+
+      A     #Option.TD; 
+      A     #Alarm.TD; 
+      S     #Alarm.TD; 
+NETWORK
+TITLE =Motor start time
+//Once energizing the PLC output to the coil, we expect a status feedback within 
+//a short amount of time. If not we create a motor start fault.
+      A     #EQ_M; 
+      AN    #EQ_MS; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_M (
+           IN                       := L      1.0,
+           PT                       := #M_max_time,
+           Q                        := #Alarm.M);
+
+      NOP   0; 
+NETWORK
+TITLE =Motor start alarm (secondary)
+//Created a new version 2.12. In a project if the contactor de-energized due to a 
+//MSP trip the manual start would clear (correctly) but it would not write a 
+//motor start fault. As a work-around, we store the running status at the end of 
+//the block. If the running status was on, we are still sending power to the 
+//coil, but we are failing to detect the coil status, we write a motor start 
+//fault.
+      A     #Running_last; 
+      A     #EQ_M; 
+      AN    #EQ_MS; 
+      S     #Alarm_M; 
+NETWORK
+TITLE =Motor start alarm
+//Construction in separate network since TIA Portal does ot have EN/ENO for IEC 
+//timers.
+      A     #Alarm.M; 
+      S     #Alarm_M; 
+NETWORK
+TITLE =General alarm
+//Combine all alarms. This can be used for an HMI where only one boolean can be 
+//used for visualization/visibility.
+      O     #Alarm_SS; 
+      O     #Alarm_CD; 
+      O     #Alarm.TD; 
+      O     #Alarm_M; 
+      S     #Alarm_general; 
+NETWORK
+TITLE =OK to start
+//If there is no emergency stop alarm, no motor related alarm, and the off delay 
+//has expired, the motor can start. In manual mode, the manual start should be 
+//cleared outside this FB when it is not OK to start.
+      A(    ; 
+      O     #Off_dly_OK; 
+      O     #Running; 
+      )     ; 
+      AN    #Alarm_general; 
+      AN    #Estop_alarm; 
+      =     #OK_to_start; 
+NETWORK
+TITLE =Energize contactor coil
+//If there is no emergency stop alarm, no general alarm from this equipment, and 
+//a valid run command was received, energize the contactor coil.
+      A     #OK_to_start; 
+      A(    ; 
+      A     #Manual_mode; 
+      A     #Start_rqd_man; 
+      O     ; 
+      AN    #Manual_mode; 
+      A     #Start_rqd_auto; 
+      )     ; 
+      =     #EQ_M; 
+NETWORK
+TITLE =Clear alarms
+//On a reset request, clear all alarms.
+      A     #Alarm_reset; 
+      R     #Alarm_general; 
+      R     #Alarm_SS; 
+      R     #Alarm_CD; 
+      R     #Alarm.TD; 
+      R     #Alarm_M; 
+NETWORK
+TITLE =Store the current running state
+//v4.12: Used in additional motor start fault detection.
+      A     #Running; 
+      =     #Running_last; 
+NETWORK
+TITLE =Return ENO
+
+      A     #Running; 
+      SAVE  ; 
+END_FUNCTION_BLOCK
+
