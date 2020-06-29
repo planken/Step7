@@ -1,0 +1,175 @@
+FUNCTION "ADNORM0.3" : VOID
+TITLE =SCALE A/D CONVERTER VALUE
+//This is an improvement of the standard Siemens FC105 SCALE, since here we can 
+//specify the limits of the A/D value. In order to reverse scale, make the lower 
+//input limit exceed the upper limit.
+//
+//v0.3: 02Dec15: Auto variable type detection, can handle INT/DINT/REAL for 
+//output.
+//v0.2: 20Jan15: Set the ENO on exit.
+AUTHOR : splanken
+VERSION : 0.3
+
+
+VAR_INPUT
+  AD_in : INT ;	//Raw value from A/D converter
+  AD_0 : INT ;	//Raw A/D value 1
+  Scale_0 : REAL ;	//Scaled output value for A/D value 1
+  AD_1 : INT ;	//Raw A/D value 2
+  Scale_1 : REAL ;	//Scaled output value for A/D value 2
+  Scale_LL : REAL ;	//Lower limit for output value (real, regardless of output type)
+  Scale_UL : REAL ;	//Upper limit for output value (real, regardless of output type)
+END_VAR
+VAR_OUTPUT
+  Scaled_Out : ANY ;	//Scaled AD value, scaled to raw/scaled pairs and limited (INT/DINT/REAL)
+END_VAR
+VAR_TEMP
+  AD_In_Real : REAL ;	
+  AD_0_Real : REAL ;	
+  AD_1_Real : REAL ;	
+  AD_Span : REAL ;	
+  Rel_AD : REAL ;	
+  Out_real : REAL ;	
+  Out_DB : INT ;	
+  OutType_int : BOOL ;	
+  OutType_real : BOOL ;	
+  OutType_dint : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+//Based on the calculation:
+//Scaled_Out = ((AD_in-AD_LL)/(AD_UL-AD_LL)) * (Scale_UL-Scale_LL) + Scale_LL
+//
+// Convert the y values to real
+      L     #AD_0; 
+      ITD   ; 
+      DTR   ; 
+      T     #AD_0_Real; 
+
+      L     #AD_1; 
+      ITD   ; 
+      DTR   ; 
+      T     #AD_1_Real; 
+
+      L     #AD_in; 
+      ITD   ; 
+      DTR   ; 
+      T     #AD_In_Real; 
+
+//Obtain AD value relative to AD limits
+      L     #AD_1_Real; 
+      L     #AD_0_Real; 
+      -R    ; 
+      T     #AD_Span; 
+
+      L     #AD_In_Real; 
+      L     #AD_0_Real; 
+      -R    ; 
+      L     #AD_Span; 
+      /R    ; 
+      T     #Rel_AD; 
+
+//-----------------------------------------
+
+//Now span relative to output limits
+
+      L     #Scale_1; 
+      L     #Scale_0; 
+      -R    ; 
+      L     #Rel_AD; 
+      *R    ; 
+
+      L     #Scale_0; 
+      +R    ; 
+      T     #Out_real; 
+
+//-----------------------------------------
+
+//Clip output to lower value
+      L     #Scale_LL; 
+      <R    ; 
+      JCN   _01a; 
+      L     #Scale_LL; 
+      T     #Out_real; 
+      JU    _01b; 
+
+//Clip output to upper limit
+_01a: NOP   0; 
+      L     #Out_real; 
+      L     #Scale_UL; 
+      >R    ; 
+      JCN   _01b; 
+      L     #Scale_UL; 
+      T     #Out_real; 
+
+//Exit
+_01b: NOP   0; 
+
+NETWORK
+TITLE =
+
+      L     P##Scaled_Out; 
+      LAR1  ; 
+
+      L     B [AR1,P#1.0]; // Check if destination is INT
+      L     5; 
+      ==I   ; 
+      =     #OutType_int; 
+
+      L     B [AR1,P#1.0]; // Check if destination is DINT
+      L     7; 
+      ==I   ; 
+      =     #OutType_dint; // Check if destination is dint
+
+      L     B [AR1,P#1.0]; // Check if destination is REAL
+      L     8; 
+      ==I   ; 
+      =     #OutType_real; 
+
+      L     W [AR1,P#4.0]; // Obtain DB nbr
+      T     #Out_DB; 
+
+      OPN   DB [#Out_DB]; // Open DB
+      L     D [AR1,P#6.0]; // Obtain 4-byte value
+      LAR1  ; 
+
+      A     #OutType_int; // If type is INT, go there
+      JC    ti; 
+
+      A     #OutType_dint; // If type is DINT, go there
+      JC    td; 
+
+      A     #OutType_real; // If type is REAL, go there
+      JC    tr; 
+
+      JU    tx; // Skip if neither
+
+// --- Type = int ---
+ti:   L     #Out_real; // Read output value
+      RND   ; // Convert output REAL to DINT
+      T     W [AR1,P#0.0]; // Write to destination
+
+      JU    tx; // Done
+
+// --- Type = dint ---
+td:   L     #Out_real; // Read output value
+      RND   ; 
+      T     D [AR1,P#0.0]; // Write to destination
+
+      JU    tx; // Done
+
+// --- Type = real ---
+tr:   L     #Out_real; // Read output value
+      T     D [AR1,P#0.0]; // Write to destination
+
+tx:   NOP   0; 
+NETWORK
+TITLE =
+
+      SET   ; 
+      SAVE  ; 
+
+
+END_FUNCTION
+
