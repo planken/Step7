@@ -1,11 +1,12 @@
-FUNCTION_BLOCK "StartsPerHour v1.2"
+FUNCTION_BLOCK "StartsPerHour v1.3"
 TITLE =Motor starts per hour
+//v1.3: 23Nov15: Return nbr of starts remaining.
 //v1.2: 19Nov15: Do not count starts if max value is 0.
 //v1.1: 27Aug15 (STP): Added backspin timer. Signal OK for either backspin timer 
 //as well as start counter if motor is running.
 //v1.0: 17Aug15 (STP): Monitor starts per hour.
 AUTHOR : STP
-VERSION : 1.2
+VERSION : 1.3
 
 
 VAR_INPUT
@@ -14,6 +15,7 @@ VAR_INPUT
   Running : BOOL ;	//Motor running (to detect starts)
 END_VAR
 VAR_OUTPUT
+  Starts_rem : INT ;	
   SPH_OK : BOOL ;	//Number of starts acceptable
   BS_OK : BOOL ;	//Backspin timer expired
   All_OK : BOOL ;	//Combined overall status
@@ -72,6 +74,28 @@ TITLE =Increment motor start counter
       T     #Start_count; 
 _002: NOP   0; 
 NETWORK
+TITLE =Return starts remaining
+
+      A(    ; 
+      L     #Starts_hr; 
+      L     #Start_count; 
+      -I    ; 
+      T     #Starts_rem; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Starts_rem; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      JNB   _005; 
+      L     0; 
+      T     #Starts_rem; 
+_005: NOP   0; 
+NETWORK
 TITLE =Trigger delay timer
 //Free running timer as long as start counter > 0.
       A(    ; 
@@ -92,7 +116,7 @@ TITLE =Decrement start counter
 //With each cycle, decrement the start counter.
       A(    ; 
       A     #T_SPH_dly.Q; 
-      JNB   _003; 
+      JNB   _006; 
       L     #Start_count; 
       L     1; 
       -I    ; 
@@ -100,17 +124,17 @@ TITLE =Decrement start counter
       AN    OV; 
       SAVE  ; 
       CLR   ; 
-_003: A     BR; 
+_006: A     BR; 
       )     ; 
       A(    ; 
       L     #Start_count; 
       L     0; 
       <I    ; 
       )     ; 
-      JNB   _004; 
+      JNB   _007; 
       L     0; 
       T     #Start_count; 
-_004: NOP   0; 
+_007: NOP   0; 
 NETWORK
 TITLE =Start backsping timer when not running
 
