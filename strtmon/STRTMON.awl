@@ -1,0 +1,180 @@
+FUNCTION_BLOCK "StartsPerHour v1.1"
+TITLE =Motor starts per hour
+//v1.1: 27Aug15 (STP): Added backspin timer. Signal OK for either backspin timer 
+//as well as start counter if motor is running.
+//v1.0: 17Aug15 (STP): Monitor starts per hour.
+AUTHOR : STP
+VERSION : 1.0
+
+
+VAR_INPUT
+  Starts_hr : INT ;	//Maximum allowable starts per hour
+  Backspin : TIME ;	//Minimum time between stop and next start
+  Running : BOOL ;	//Motor running (to detect starts)
+END_VAR
+VAR_OUTPUT
+  SPH_OK : BOOL ;	//Number of starts acceptable
+  BS_OK : BOOL ;	//Backspin timer expired
+  All_OK : BOOL ;	//Combined overall status
+END_VAR
+VAR
+  Start_count : INT ;	//Start counter incremented each start, decremented over time
+  Rqd_delay : TIME ;	//Desired delay given max nbr of starts
+  Start_pls : BOOL ;	//Start detection
+  T_SPH_dly : "TON";	//Delay to decrement start counter
+  T_BS_dly : "TON";	//Backspin delay
+END_VAR
+VAR_TEMP
+  Tmp_SPH_OK : BOOL ;	//Temp: starts / hr OK
+  Tmp_BS_OK : BOOL ;	//Temp: backspin timer OK
+END_VAR
+BEGIN
+NETWORK
+TITLE =Calculate desired start delay in seconds
+//Given the desired number of starts per hour, calculate the desired delay 
+//between count downs.
+
+
+      A(    ; 
+      L     T#0MS; 
+      T     #Rqd_delay; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Starts_hr; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      JNB   _001; 
+      L     T#1H; 
+      L     #Starts_hr; 
+      /D    ; 
+      T     #Rqd_delay; 
+_001: NOP   0; 
+NETWORK
+TITLE =Increment motor start counter
+//With each start, increment the start counter.
+      A     #Running; 
+      FP    #Start_pls; 
+      JNB   _002; 
+      L     #Start_count; 
+      L     1; 
+      +I    ; 
+      T     #Start_count; 
+_002: NOP   0; 
+NETWORK
+TITLE =Trigger delay timer
+//Free running timer as long as start counter > 0.
+      A(    ; 
+      L     #Start_count; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      AN    #T_SPH_dly.Q; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_SPH_dly (
+           IN                       := L      1.0,
+           PT                       := #Rqd_delay);
+
+      NOP   0; 
+NETWORK
+TITLE =Decrement start counter
+//With each cycle, decrement the start counter.
+      A(    ; 
+      A     #T_SPH_dly.Q; 
+      JNB   _003; 
+      L     #Start_count; 
+      L     1; 
+      -I    ; 
+      T     #Start_count; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_003: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Start_count; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      JNB   _004; 
+      L     0; 
+      T     #Start_count; 
+_004: NOP   0; 
+NETWORK
+TITLE =Start backsping timer when not running
+
+      AN    #Running; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_BS_dly (
+           IN                       := L      1.0,
+           PT                       := #Backspin);
+
+      NOP   0; 
+NETWORK
+TITLE =Evaluate starts/hr status
+//As long as the start counter remains below or at the threshold the maximum 
+//number of starts will remain safe.
+//
+//The combined comparisons ensures the OK output will be false at the max number 
+//of starts (or 0). Using "<=" would mean always one start more would be 
+//permitted.
+//
+//(Using temp bool so we only write to the output.)
+      O(    ; 
+      L     #Start_count; 
+      L     #Starts_hr; 
+      <I    ; 
+      )     ; 
+      O(    ; 
+      L     #Start_count; 
+      L     0; 
+      ==I   ; 
+      )     ; 
+      O(    ; 
+      L     #Starts_hr; 
+      L     0; 
+      ==I   ; 
+      )     ; 
+      O     #Running; 
+      =     #Tmp_SPH_OK; 
+NETWORK
+TITLE =Evaluate backspin status
+//(Using temp bool so we only write to the output.)
+      O     #T_BS_dly.Q; 
+      O(    ; 
+      L     #Backspin; 
+      L     T#0MS; 
+      ==I   ; 
+      )     ; 
+      O     #Running; 
+      =     #Tmp_BS_OK; 
+NETWORK
+TITLE =Output starts/hour status
+
+      A     #Tmp_SPH_OK; 
+      =     #SPH_OK; 
+NETWORK
+TITLE =Output backspin timer status
+
+      A     #Tmp_BS_OK; 
+      =     #BS_OK; 
+NETWORK
+TITLE =Output "all OK" status
+
+      A     #Tmp_SPH_OK; 
+      A     #Tmp_BS_OK; 
+      =     #All_OK; 
+NETWORK
+TITLE =Force ENO
+
+      SET   ; 
+      SAVE  ; 
+
+END_FUNCTION_BLOCK
+
