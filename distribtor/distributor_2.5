@@ -1,0 +1,1279 @@
+FUNCTION_BLOCK "DISTR 2.5"
+TITLE =Distributor control FM350-1
+//Distributor control for Hi-Pro Olds for use with S7 FM350-1 counter and 
+//Simatic counter control function.
+AUTHOR : STP
+FAMILY : Motor
+NAME : Distr
+VERSION : 2.5
+
+
+VAR_INPUT
+  Lookup_DB : BLOCK_DB ;	//Distributor lookup table (spout v. encoder data)
+  MoveEnable : BOOL  := TRUE;	//Enable distributor movement
+  Manual : BOOL ;	//1=Manual control; 0=auto
+  EmergencyStop : BOOL ;	//Emergency stop input
+  HomeIndexProxy : BOOL ;	//Hardware proxy for home position
+  MotorStatusFwd : BOOL ;	//Contactor status for FORWARD
+  MotorStatusRev : BOOL ;	//Contactor status for REVERSE
+  FaultReset : BOOL ;	//Clear alarms
+  FM_STS_SET : BOOL ;	//FM counter STST_SET input (encoder Z)
+  FM_count : INT ;	//Current encoder value
+  Equip_SP : INT ;	//Requested equipment number to position to
+END_VAR
+VAR_OUTPUT
+  EquipNbrCurrent : INT ;	//Equip Nbr distributor is currrently at
+  PositionAchieved : BOOL ;	//Set when distributor settled on requested equip nbr
+  MotorRunning : BOOL ;	//Contactor coil engaged, motor running FWD or REV
+  MotorRunFwd : BOOL ;	//Energize forward contactor coil
+  MotorRunRev : BOOL ;	//Energize reverse contactor coil
+END_VAR
+VAR_IN_OUT
+  ManualRunFwd : BOOL ;	//Manual run forward command
+  ManualJogFwd : BOOL ;	//Manual jog forward command
+  ManualRunRev : BOOL ;	//Manual run reverse command
+  ManualJogRev : BOOL ;	//Manual jog reverse command
+  Count_actual : INT ;	//Biased counter value
+  MotorStartFault : BOOL ;	//Contactor could not energize in allotted time
+  PositioningFault : BOOL ;	//Positioning timed out
+  HomeIndexFault : BOOL ;	//Home index pulse encountered in unexpected location
+  SelectionFault : BOOL ;	//Invalid silo requested
+  GeneralFault : BOOL ;	//Signal to WinCC any other fault is active
+END_VAR
+VAR
+  UserConfig : STRUCT 	
+   UseHomeIndexProxy : BOOL  := TRUE;	//Home proxy installed? 0=no home proxy; 1=home proxy
+   NewBin_SeekHome : BOOL  := TRUE;	//0=reposition (shortest route); 1=first seek home with each new bin request
+   First_scan : BOOL ;	//PLC first scan one-shot
+   SeekHome_req : BOOL ;	//Seek home request *future*
+   Cal_req : BOOL ;	//Calibration request *future*
+   Cal_busy : BOOL ;	//Calibration is in progress *future*
+   Init_busy : BOOL ;	//Running initialization
+   HomeCountFwd : INT ;	//Encoder count where home pulse is expected for forward movement
+   HomeCountRev : INT ;	//Encoder count where home pulse is expected for reverse movement
+   Deadband_Searching : INT  := 10;	//Deadband while searching (try to keep as low as possible)
+   Deadband_PosAchd : INT  := 10;	//Deadband once position achieved (max disturbance before losing position)
+   PreActPreset : INT  := 25;	//Preact value (must exceed deadband for jogging to function)
+   CoastStopTime : TIME  := T#3S;	//Off time before energizing contactors
+   MotorFaultTime : TIME  := T#100MS;	//Max contactor response time
+   PositionFaultTime : TIME  := T#2M;	//Max time allowed for positioning process before timeout occurs
+   PosAchdDly : TIME  := T#1S200MS;	//Short delay before signalling position achieved
+   ManualJogTime : TIME  := T#50MS;	//Desired jog duration (if default is insufficient)
+  END_STRUCT ;	
+  PreactRange : BOOL ;	//Current encoder count within preact range
+  ResetModeOn : BOOL ;	//***Not used***
+  JogRqd : BOOL ;	//Jog if not in position
+  Running_aux : BOOL ;	//Running status (internal)
+  SeekHome : BOOL ;	//Reset and re-align
+  HomeProxy : BOOL ;	//Home index proxy was detected
+  HomeProxy_pls : BOOL ;	//Home index pulse detection
+  BinSP_Valid : BOOL ;	//Requested bin is valid value
+  Bin_GT_0 : BOOL ;	//Current setpoint > 0
+  GoForward : BOOL ;	//Shortest path for target is forward
+  GoReverse : BOOL ;	//Shortest path for target is reverse
+  New_SP : BOOL ;	//New setpoint was requested
+  Exec_home_cal : BOOL ;	//Execute calibration of home position
+  Home_cal_pls : BOOL ;	//Calibration pulse
+  Exec_home_cal_OS : BOOL ;	//Calibraion one-shot
+  Fault_reset_2 : BOOL ;	//Combined fault reset (user & at start of cal)
+  PosAchd_internal : BOOL ;	//Position achieved (does not necessarily match user setpoint)
+  IndexRangeCW : BOOL ;	//Encoder in CW index range
+  IndexRangeCCW : BOOL ;	//Encoder in CCW index range
+  OK_to_start : BOOL ;	//Motor OK to start
+  Exec_init : BOOL ;	//Execute initalization run to detect encoder Z pulse
+  Exec_pls : BOOL ;	//***Not used***
+  Count_bias : INT ;	//Bias to be applied to raw count value from counter
+  Target : INT ;	//Encoder count of reqd bin from lookup table
+  TargetError : INT ;	//Signed count difference to target
+  TargetError_abs : INT ;	//Absolute count difference to target
+  Intern_SP : INT ;	//Internal: last setpoint > 0
+  Intern_SP_prev : INT ;	//Previous equipment number requested
+  PreAct : INT  := 47;	//Preact value, corrected
+  Deadband : INT ;	//Actual deadband used
+  IndexErrorCW : INT ;	//Error to CW index
+  IndexErrorCW_abs : INT ;	//Error to CW index (absolute)
+  IndexErrorCCW : INT ;	//Error to CCW index
+  IndexErrorCCW_abs : INT ;	//Error to CCW index (absolute)
+  LastIndex : STRUCT 	//Last recorded index counts (evaluation only)
+   Fwd : ARRAY  [1 .. 3 ] OF //Array of count values
+   INT ;	
+   Rev : ARRAY  [1 .. 3 ] OF //Array of count values
+   INT ;	
+  END_STRUCT ;	
+  T_M : "TON";	//Motor contactor response timer
+  T_Pos : "TON";	//Positioning timer
+  T_PosAchd : "TON";	//Position achieved delay
+  T_BS : "TON";	//Motor coast stop timer
+  T_Jog : "TON";	//Auto mode jog required to align spout
+  T_JogFwd : "TON";	//Manual mode jog for forward motion
+  T_JogRev : "TON";	//Manual mode jog for reverse motion
+  T_Init_dly : "TON";	//Init cycle minimum run time
+  T_Init_TO : "TON";	//Init cycle timeout
+END_VAR
+VAR_TEMP
+  LoopCount : INT ;	
+  LoopCount2 : INT ;	
+  AlwaysOn : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Comments
+//v2.5:  - THIS IS A CRITICAL BUG FIX.
+//         At power up the FM counter value is zeroed. By rotating until the
+//         Z pulse from the encoder is detected will correct this.
+//       - This version requires recompiling of the instance data block.
+//       - Added input FM_STS_SET (Z pulse from encoder).
+//       - At first scan, rotate forward until the Z pulse from the encoder is
+//         detected. After that, execute the SEEK HOME cycle as before. This      
+//         ensures that after power up the counter value is valid.
+//       - Activated the UserConfig.Cal_req.
+//       - Do not write home index fault when in manual mode.
+//v2.46: - No instance data changes / minor change only.
+//       - Consolidated networks to clear manual run requests.
+//v2.45: - This version requires recompiling of the instance data block.
+//       - Determine shortest path to home index instead of fixed CW.
+//       - During SeekHome, latch the direction to prevent reversal if the home 
+//         index proxy cannot be found.
+//       - During a calibration, force forward movement.
+//       - Eliminated LL/UL calculations for various targets, now using error     
+//         signals. Sign indicates rotation needed, value indicates amount of     
+//         correction needed.
+//       - While position has been achieved, interrupt any forward/reverse 
+//         request (interferes with SeekHome).
+//       - Always store the previous SP even if 0.
+//       - Removed self-correcting preact, not reliable, will add later.
+//       - SP=0 is not considered valid. After this, could reduce the use of 
+//         #BIN_GT_0 in several networks. (Only used in secuting lookup and 
+//         invalid setpoint alarm.
+//       - Replaced the fixed motor jog time of T#150MS with manual jog time.
+//       - Simplified contactor logic.
+//       - Move user SP to internal SP if > 0. Use internal SP only.
+//       - Moved external first scan code to this FB. On first scan, we cancel
+//         any calibration in progress and start SeekHome. If the SP=0 we look
+//         up the first non-zero bin from the lookup table as new SP.
+//v2.44: - No changes to instance data, new FB is drop-in replacement.
+//       - Error value sign did not always properly indicate direction needed
+//         if error exceeded 180 degrees. Correction was always done in
+//         fwd/rev determination. Corrected & simplified.
+//       - Do not run timeout timer without bin (Bin_T_0 = TRUE).
+//       - Prior, no seek home executed with SP=0. Seek home was never executed
+//         on first scan.
+//       - Without MoveEnable the auto forward request will not become TRUE.
+//         Note that this is also checked in the contactor logic.
+//       - Write Bin_GT_0 before executing the bin lookup to avoid looking up 
+//         encoder counts for bin=0.
+//       - No "position achieved" without valid bin > 0. This is a significant
+//         deviation from previous versions but this allows the PLC program to
+//         stop any infeed equipment.
+//v2.43: - Rearranged the interface, grouping booleans.
+//       - Do not run timeout timer if MoveEnable false or Manual is true.
+//       - Added manual control option.
+//       - Eliminated accidental use of M0.0 "AlwaysOn".
+//       - Clear the previous index values at the start of a calibration.
+//       - Once an index fault has occurred, force a seek home. This will 
+//         perpetuate until a calibration is executed. (Otherwise the fault may 
+//         deliberately be ignored.)
+//       - Clear seek home or cal without the home proxy option.
+//       - Moved lookup prepare + execution after new bin detection (if invalid
+//         bin was supplied SeekHome would be set).
+//       - Prevent timeout without move enable.
+//       - Prohibit energizing contactors without move enable signal.
+//       - Extended lookup limit from 20 to 32 to match lookup DB.
+//v2.42: - Auto clear faults at start of calibration (more user friendly).
+//v2.41: - Don't run position timeout timer during HomeIndexFault.
+//v2.4:  - Replace integer-based timers with TON SFB4 calls.
+//       - Added a variable counter bias (external to this FB).
+//       - Added a home index test, manual or with each new bin setpoint.
+//       - Added home index calibration (external to this FB) to correct bias
+//         after removal/replacement of encoder.
+//       - Cleaned up original code, removing unused addresses.
+//       - Cleaned up FB interface. Several values now written directly to        
+//         instance datablock in calling routine.
+//       - Changed new setpoint detection. Lookup table now read with each 
+//         change.
+//       - With "no bin" or invalid setpoint current target retained.
+//v2.3:  - Use separate lookup DB.
+//v2.2:  - Always load preact value. Improved deadband and preact range 
+//         calculations. No interface changes from v2.2.
+//v2.1:  - Suppress selection faults if coming from 0-bin. No interface changes.
+//v2.0:  - Rewrite and improvements of original code.
+//
+//Note: this code has been properly documented for all those lazy programmers 
+//that are unwilling or unable to understand someone else's code. Leave the back 
+//seat, take the wheel and drive this thing.
+// Fuck you all.
+
+NETWORK
+TITLE =Apply counter bias
+//Avoid the use of LOAD_DIRECT for values other than L#0. The encoder still 
+//issues a Z rollover at the same physical position, causing a loss of position. 
+//Instead, we bias the FM encoder count value by the amount needed.
+//
+//The encoder will count 2540 pulses between -2540..+2540 depending on rotation.
+//
+//Compensate for under/overflow:
+//  - If the biased value < 0 we correct by adding 2540.
+//  - If the biased value >= 2540 we correct by subtracting 2540.
+//  This ensures the biased counter value is always in the range 0-2540.
+//
+//21Oct15: (STP) Moved external code inside this FB.
+      L     #FM_count; 
+      L     #Count_bias; 
+      +I    ; 
+      T     #Count_actual; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #Count_actual; 
+      L     L#0; 
+      <I    ; 
+      )     ; 
+      JNB   _001; 
+      L     #Count_actual; 
+      L     2540; 
+      +I    ; 
+      T     #Count_actual; 
+_001: NOP   0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #Count_actual; 
+      L     2540; 
+      >=I   ; 
+      )     ; 
+      JNB   _002; 
+      L     #Count_actual; 
+      L     2540; 
+      -I    ; 
+      T     #Count_actual; 
+_002: NOP   0; 
+NETWORK
+TITLE =Move setpoint to internal setpoint
+//We transfer the user setpoint to an internal setpoint, allowing ingoring a SP 
+//of 0. On first scan we will move to this target.
+      A(    ; 
+      L     #Equip_SP; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      JNB   _003; 
+      L     #Equip_SP; 
+      T     #Intern_SP; 
+_003: NOP   0; 
+NETWORK
+TITLE =Indicate internal SP > 0
+//Used in various networks.
+//
+//03Feb16: (STP) v2.44: Execute this prior to the bin lookup, not after.
+//10Feb16: (STP) v2.45: Store last SP>0 to internal setpoint.
+      L     #Intern_SP; 
+      L     0; 
+      >I    ; 
+      =     #Bin_GT_0; 
+NETWORK
+TITLE =Init - Trigger from first scan
+//v2.5: The Init cycle causes the motor to run forward until the encoder Z 
+//pulse is detected.
+      A     #UserConfig.First_scan; 
+      S     #Exec_init; 
+NETWORK
+TITLE =Init - Deny cal & seek home *NOT USED*
+//v2.5 mod: Since we also enforce a init run at the start of a calibration, we do 
+//not want to deny the calibratin request. Originally:
+//
+//A #Exec_init
+//R #UserConfig.Cal_req
+//R #Exec_home_cal
+//R #SeekHome
+NETWORK
+TITLE =Init - Indicate busy
+
+      A     #Exec_init; 
+      =     #UserConfig.Init_busy; 
+NETWORK
+TITLE =Init - Enforce minimum run time
+//v2.5: The encoder may be stopped exactly on the Z pulse, so we run for a 
+//minimum time to ensure we are not on top of that Z pulse when initiating this 
+//to ensure counter roll-over.
+      A     #Exec_init; 
+      A     #MotorStatusFwd; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Init_dly (
+           IN                       := L      5.0,
+           PT                       := T#1S);
+
+      NOP   0; 
+NETWORK
+TITLE =Init - Time out
+//v2.5: Should the encoder Z pulse not be detected we signal a timeout fault.
+      A     #Exec_init; 
+      A     #MotorStatusFwd; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Init_TO (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.PositionFaultTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Init - Complete
+//v2.5: Once we detect the encoder Z pulse we interrupt the init run and execute 
+//the code that is needed for first scan:
+//- End the init run.
+//- Force a setpoint lookup (if setpoint is supplied).
+//- Force a seek home.
+      A     #T_Init_dly.Q; 
+      A     #FM_STS_SET; 
+      =     L      5.0; 
+      A     L      5.0; 
+      BLD   102; 
+      R     #Exec_init; 
+      A     L      5.0; 
+      JNB   _004; 
+      L     -1; 
+      T     #Intern_SP_prev; 
+_004: NOP   0; 
+      A     L      5.0; 
+      BLD   102; 
+      S     #SeekHome; 
+NETWORK
+TITLE =Without valid SP, use 1st from lookup table
+//Without a valid setpoint, use the first one from the lookup table. 
+//      A     #UserConfig.First_scan
+      AN    #Bin_GT_0; 
+      JCN   F2; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      OPN   #Lookup_DB; // Open external lookup table
+
+      LAR1  P#0.0; // Point to 1st equipnbr
+      L     32; // Can't exceed lookup table item count
+F0:   T     #LoopCount2; // ===== Iteration start =====
+
+      L     DBW [AR1,P#0.0]; // [ Quit early when equip# negative
+      L     0; // [
+      <I    ; // [
+      JC    F2; // [
+
+      L     DBW [AR1,P#0.0]; // [ Next if equip# 0
+      L     0; // [
+      ==I   ; // [
+      JC    F1; // [
+
+      L     DBW [AR1,P#0.0]; // [ 1st valid bin# found
+      T     #Intern_SP; // [ ..use as setpoint
+      SET   ; // [ ..indicate valid
+      S     #Bin_GT_0; // [
+      JU    F2; // [ .. exit
+
+F1:   +AR1  P#4.0; // [ No match, next bin from table
+      L     #LoopCount2; // [
+      LOOP  F0; // [ ..loop
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+F2:   NOP   0; 
+NETWORK
+TITLE =Calibration - Execute from user request
+
+      A     #UserConfig.Cal_req; 
+      S     #Exec_home_cal; 
+      R     #UserConfig.Cal_req; 
+NETWORK
+TITLE =Calibratin - Indicate cal running
+
+      A     #Exec_home_cal; 
+      =     #UserConfig.Cal_busy; 
+NETWORK
+TITLE =Calibration - exit without proxy option
+//When the home proxy option is not enabled we do not allow a calibration to be 
+//executed.
+      AN    #UserConfig.UseHomeIndexProxy; 
+      R     #Exec_home_cal; 
+NETWORK
+TITLE =Calibration - force SeekHome
+//During the calibration we force a regular seek home cycle. (This uses all the 
+//existing contactor control.) At the end of the calibration we calculate any 
+//bias needed to shift the home index pulse count.
+//
+//v2.42: Transfer the calibration start to a TEMP bool to allow auto clearing 
+//faults that would otherwise interfere with the calibration. (This did not 
+//require reloading the instance data block.)
+//v2.43: Moved TEMP one-shot to STAT.
+//v2.5: Also force a encode initialization.
+      A     #Exec_home_cal; 
+      FP    #Home_cal_pls; 
+      S     #SeekHome; 
+      =     #Exec_home_cal_OS; 
+      S     #Exec_init; 
+NETWORK
+TITLE =Combine fault reset requests
+//v2.42: At the start of a calibration we also clear faults to allow motor 
+//movement.
+      O     #Exec_home_cal_OS; 
+      O     #FaultReset; 
+      O     #UserConfig.First_scan; 
+      =     #Fault_reset_2; 
+NETWORK
+TITLE =Calibration - finish when proxy detected
+//We finish the calibration once the proxy has been detected. We calculate the 
+//new bias to be applied to obtain the desired encoder count value for the home 
+//index. In other words, the calibration shifts the home index pulse to match the 
+//CW value supplied to this FB by the user.
+      A     #Exec_home_cal; 
+      A     #HomeProxy; 
+      JNB   _005; 
+      L     #UserConfig.HomeCountFwd; 
+      L     #FM_count; 
+      -I    ; 
+      T     #Count_bias; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_005: A     BR; 
+      R     #Exec_home_cal; 
+NETWORK
+TITLE =Calibration - exit on timeouot
+//While the timeout is active we cannot execute a calibration. We do not clear 
+//the home seek request.
+      A     #Exec_home_cal; 
+      A     #PositioningFault; 
+      R     #Exec_home_cal; 
+NETWORK
+TITLE =Seek home - clear seek without proxy option
+//Seek home could be set from first scan, but needs to be denied w/o proxy.
+      AN    #UserConfig.UseHomeIndexProxy; 
+      R     #SeekHome; 
+NETWORK
+TITLE =New bin - new setpoint detection
+//Detect a new bin setpoint.
+//
+//Note that SP=0 will not trigger a bin lookup, and will not change the target.
+      A(    ; 
+      L     #Intern_SP; 
+      L     #Intern_SP_prev; 
+      <>I   ; 
+      )     ; 
+      JNB   _006; 
+      L     #Intern_SP; 
+      T     #Intern_SP_prev; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_006: A     BR; 
+      =     #New_SP; 
+NETWORK
+TITLE =New bin - prepare lookup
+//When we execute this we have a new bin number to look up.
+//
+//(Note: since v2.45 many statements here were removed.)
+      A     #New_SP; 
+      R     #BinSP_Valid; 
+NETWORK
+TITLE =New bin - lookup encoder target for requested equipment
+//26Mar07: (STP) Replaced all old ladder logic and reduced code by 95% for this 
+//part. Iterate the lookup array to find the desired setpoint and obtain the 
+//encoder count.
+//30Jan16: (STP) v2.43 - Increased loop count from 20 to 32 to match lookup DB.
+// The lookup DB is expected to have a 32 two-word elements:
+//   Equip_x INT = Equipment nbr or bin nbr
+//   Count_x INT = Corresponding encoder count
+
+// After any change to the lookup table:
+//   1) RE-INITIALIZE the data block
+//   2) ENSURE it is still WRITE-PROTECTED
+//   3) DOWNLOAD it to the CPU
+
+      ON    #Bin_GT_0; // Only execute on bin > 0
+      ON    #New_SP; // Only execute on new setpoint
+      JC    L2; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      OPN   #Lookup_DB; // Open external lookup table
+
+      LAR1  P#0.0; // Point to 1st equipnbr
+      L     32; // Can't exceed lookup table item count
+L0:   T     #LoopCount; // ===== Iteration start =====
+
+      L     DBW [AR1,P#0.0]; // [ Quit early when equip# negative
+      L     0; // [
+      <I    ; // [
+      JC    L2; // [
+
+      L     DBW [AR1,P#0.0]; // [ Bin nbr in table matches SP
+      L     #Intern_SP; // [
+      ==I   ; // [
+      JCN   L1; // [
+      L     DBW [AR1,P#2.0]; // [ ..store new target
+      T     #Target; // [
+      SET   ; // [
+      =     #BinSP_Valid; // [ ..bin valid, now quit
+      JU    L2; 
+
+L1:   +AR1  P#4.0; // [ No match, next bin from table
+      L     #LoopCount; // [
+      LOOP  L0; // [ ..loop
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+L2:   NOP   0; 
+
+NETWORK
+TITLE =Indicate motor running
+//Indicate to WinCC that the motor is running forward or reverse.
+//
+//(The "aux" is there because we need to read this status as well, and it is 
+//defined as an output.)
+      O     #MotorStatusFwd; 
+      O     #MotorStatusRev; 
+      =     #MotorRunning; 
+      =     #Running_aux; 
+NETWORK
+TITLE =Motor start fault - Monitor response time
+//When the command is given to run forward or reverse but no coil status is 
+//registered, we start the timeout count. We can use a single accumulator for 
+//both directions since these are mutually exclusive.
+      A(    ; 
+      A     #MotorRunFwd; 
+      AN    #MotorStatusFwd; 
+      O     ; 
+      A     #MotorRunRev; 
+      AN    #MotorStatusRev; 
+      )     ; 
+      AN    #MotorStartFault; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_M (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.MotorFaultTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Motor start fault - Write fault
+//v2.42: Clear the timeout fault at the start of a calibration to permit motor 
+//movement.
+      A     #Fault_reset_2; 
+      R     #MotorStartFault; 
+      A     #T_M.Q; 
+      S     #MotorStartFault; 
+      NOP   0; 
+NETWORK
+TITLE =Positioning timeout - Monitor positioning time
+//This occurs when the requested position cannot be found within the time
+//alotted. Do not test for contactor status.
+//
+//06Oct15: (STP) Version 2.4 beta 3 - Also declare positioning fault during home 
+//seek cycle in case we fail to detect the home pulse.
+//15Jan16: (STP) Version 2.4 - Don't run timer during HomeIndexFault.
+//21Jan16: (STP) v.243 - Do not run timer if MoveEnable false or Manual is true.
+//03Feb16: (STP) v2.44 - Do not run timer without bin.
+      A(    ; 
+      AN    #PosAchd_internal; 
+      AN    #SeekHome; 
+      A     #BinSP_Valid; 
+      O     #SeekHome; 
+      )     ; 
+      AN    #PositioningFault; 
+      AN    #HomeIndexFault; 
+      AN    #Exec_init; 
+      A     #MoveEnable; 
+      AN    #Manual; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Pos (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.PositionFaultTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Positioning timeout - Write fault
+//v2.42: Clear the timeout fault at the start of a calibration to permit motor 
+//movement.
+//v2.5: Also signal timeout fault during init run (Z pulse not detected).
+      A     #Fault_reset_2; 
+      R     #PositioningFault; 
+      A(    ; 
+      O     #T_Pos.Q; 
+      O     #T_Init_TO.Q; 
+      )     ; 
+      S     #PositioningFault; 
+      NOP   0; 
+NETWORK
+TITLE =Selection fault - Detect invalid equipment setpoint
+//When the bin lookup code did not return a positive result we alert the 
+//operator.
+      A(    ; 
+      O     #Fault_reset_2; 
+      O     #SeekHome; 
+      O     #BinSP_Valid; 
+      )     ; 
+      R     #SelectionFault; 
+      AN    #BinSP_Valid; 
+      A     #Bin_GT_0; 
+      S     #SelectionFault; 
+      NOP   0; 
+NETWORK
+TITLE =Home index - Detect home index proxy
+//v2.5: Ignore the home index proxy while in the INIT cycle.
+      A     #HomeIndexProxy; 
+      FP    #HomeProxy_pls; 
+      A     #UserConfig.UseHomeIndexProxy; 
+      AN    #Exec_init; 
+      =     #HomeProxy; 
+NETWORK
+TITLE =Home index - Clear all values when calibrating
+//21Jan16: v2.43: Clear the previous index values at the start of a calibration.
+      A     #Exec_home_cal_OS; 
+      =     L      5.0; 
+      A(    ; 
+      A     L      5.0; 
+      JNB   _007; 
+      L     0; 
+      T     #LastIndex.Fwd[1]; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_007: A     BR; 
+      )     ; 
+      JNB   _008; 
+      L     0; 
+      T     #LastIndex.Fwd[2]; 
+_008: NOP   0; 
+      A(    ; 
+      A     L      5.0; 
+      JNB   _009; 
+      L     0; 
+      T     #LastIndex.Fwd[3]; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_009: A     BR; 
+      )     ; 
+      JNB   _00a; 
+      L     0; 
+      T     #LastIndex.Rev[1]; 
+_00a: NOP   0; 
+      A(    ; 
+      A     L      5.0; 
+      JNB   _00b; 
+      L     0; 
+      T     #LastIndex.Rev[2]; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_00b: A     BR; 
+      )     ; 
+      JNB   _00c; 
+      L     0; 
+      T     #LastIndex.Rev[3]; 
+_00c: NOP   0; 
+NETWORK
+TITLE =Home index - Record last home index values (forward)
+//Store the last 3 encouder counts for forward and reverse for analysis. Only 
+//record the values if the pulse was detected during commanded movement.
+      A     #HomeProxy; 
+      A     #MotorStatusFwd; 
+      =     L      5.0; 
+      A     L      5.0; 
+      JNB   _00d; 
+      L     #LastIndex.Fwd[2]; 
+      T     #LastIndex.Fwd[3]; 
+_00d: NOP   0; 
+      A     L      5.0; 
+      JNB   _00e; 
+      L     #LastIndex.Fwd[1]; 
+      T     #LastIndex.Fwd[2]; 
+_00e: NOP   0; 
+      A     L      5.0; 
+      JNB   _00f; 
+      L     #Count_actual; 
+      T     #LastIndex.Fwd[1]; 
+_00f: NOP   0; 
+NETWORK
+TITLE =Home index - Record last home index values (reverse)
+//Store the last 3 encouder counts for forward and reverse for analysis. Only 
+//record the values if the pulse was detected during commanded movement.
+      A     #HomeProxy; 
+      A     #MotorStatusRev; 
+      =     L      5.0; 
+      A     L      5.0; 
+      JNB   _010; 
+      L     #LastIndex.Rev[2]; 
+      T     #LastIndex.Rev[3]; 
+_010: NOP   0; 
+      A     L      5.0; 
+      JNB   _011; 
+      L     #LastIndex.Rev[1]; 
+      T     #LastIndex.Rev[2]; 
+_011: NOP   0; 
+      A     L      5.0; 
+      JNB   _012; 
+      L     #Count_actual; 
+      T     #LastIndex.Rev[1]; 
+_012: NOP   0; 
+NETWORK
+TITLE =Home index fault - write fault
+//Check if the home index pulse occurred within the expected deadband. If not, 
+//alert the operator.
+//v2.5: Do not write home index fault when in manual mode.
+      A     #HomeProxy; 
+      AN    #Manual; 
+      AN    #Exec_home_cal; 
+      A(    ; 
+      A     #MotorStatusFwd; 
+      AN    #IndexRangeCW; 
+      O     ; 
+      A     #MotorStatusRev; 
+      AN    #IndexRangeCCW; 
+      )     ; 
+      S     #HomeIndexFault; 
+      A     #Fault_reset_2; 
+      R     #HomeIndexFault; 
+      NOP   0; 
+NETWORK
+TITLE =Home index fault - force seek home
+//21Jan16: v2.43: Once an index fault has occurred, force a seek home. This will 
+//perpetuate until a calibration is executed. (Otherwise the fault may 
+//deliberately be ignored.)
+//25Jan16: v2.43: Only force seek home if proxy option installed.
+      A     #HomeIndexFault; 
+      A     #UserConfig.UseHomeIndexProxy; 
+      S     #SeekHome; 
+NETWORK
+TITLE =Write general fault
+//Common fault bit mainly to test for in WinCC.
+
+//---Write combined fault for WinCC--
+
+//This is used in the WinCC object
+//for the distributor so only one
+//tag has to be monitored for changes.
+
+      O     #SelectionFault; 
+      O     #MotorStartFault; 
+      O     #PositioningFault; 
+      O     #HomeIndexFault; 
+
+      =     #GeneralFault; 
+NETWORK
+TITLE =Seek home on new setpoint
+//With this option we can automatically seek home prior to positioning to a new 
+//bin. On detection of the hime index pulse we proceed to the new poisition.
+      A     #UserConfig.NewBin_SeekHome; 
+      A     #New_SP; 
+      A     #BinSP_Valid; 
+      A     #UserConfig.UseHomeIndexProxy; 
+      S     #SeekHome; 
+      AN    #UserConfig.First_scan; 
+      A     #HomeProxy; 
+      A     #Running_aux; 
+      R     #SeekHome; 
+      NOP   0; 
+NETWORK
+TITLE =Load deadband depending on status
+//Once the distributor position has been achieved, load a wider deadband to 
+//prevent the distributor from re-positioning due to small movements.
+      A(    ; 
+      L     #UserConfig.Deadband_Searching; 
+      T     #Deadband; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A     #PosAchd_internal; 
+      JNB   _013; 
+      L     #UserConfig.Deadband_PosAchd; 
+      T     #Deadband; 
+_013: NOP   0; 
+NETWORK
+TITLE =Calculate target error
+//The signed error is the difference between the current position and the desired 
+//position. The error determines the correction needed to achieve target 
+//position.
+//Should the error exceed 180 degrees we correct the rotation needed.
+//
+//Negative error values: short of target, requires CW movement.
+//Positive error values: exceeded target, requires CCW movement.
+//
+//03Feb16: (STP) v2.44: Calculate error and correct for rollover and rotation. 
+//The sign indicates rotation required to achieve target. So neg values require 
+//CW rotation and pos values require CCW rotation to achieve target.
+      L     #Count_actual; 
+      L     #Target; 
+      -I    ; 
+      T     #TargetError; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #TargetError; 
+      L     -1269; 
+      <I    ; 
+      )     ; 
+      JNB   _014; 
+      L     #TargetError; 
+      L     2540; 
+      +I    ; 
+      T     #TargetError; 
+_014: NOP   0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #TargetError; 
+      L     1269; 
+      >I    ; 
+      )     ; 
+      JNB   _015; 
+      L     #TargetError; 
+      L     2540; 
+      -I    ; 
+      T     #TargetError; 
+_015: NOP   0; 
+NETWORK
+TITLE =Calculate CW home index error
+//09Feb16: (STP) v2.45: Also calculate the error for the CW/CCW home index.
+      L     #Count_actual; 
+      L     #UserConfig.HomeCountFwd; 
+      -I    ; 
+      T     #IndexErrorCW; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #IndexErrorCW; 
+      L     -1269; 
+      <I    ; 
+      )     ; 
+      JNB   _016; 
+      L     #IndexErrorCW; 
+      L     2540; 
+      +I    ; 
+      T     #IndexErrorCW; 
+_016: NOP   0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #IndexErrorCW; 
+      L     1269; 
+      >I    ; 
+      )     ; 
+      JNB   _017; 
+      L     #IndexErrorCW; 
+      L     2540; 
+      -I    ; 
+      T     #IndexErrorCW; 
+_017: NOP   0; 
+NETWORK
+TITLE =Calculate CCW home index error
+//09Feb16: (STP) v2.45: Also calculate the error for the CW/CCW home index.
+      L     #Count_actual; 
+      L     #UserConfig.HomeCountRev; 
+      -I    ; 
+      T     #IndexErrorCCW; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      =     L      5.0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #IndexErrorCCW; 
+      L     -1269; 
+      <I    ; 
+      )     ; 
+      JNB   _018; 
+      L     #IndexErrorCCW; 
+      L     2540; 
+      +I    ; 
+      T     #IndexErrorCCW; 
+_018: NOP   0; 
+      A     L      5.0; 
+      A(    ; 
+      L     #IndexErrorCCW; 
+      L     1269; 
+      >I    ; 
+      )     ; 
+      JNB   _019; 
+      L     #IndexErrorCCW; 
+      L     2540; 
+      -I    ; 
+      T     #IndexErrorCCW; 
+_019: NOP   0; 
+NETWORK
+TITLE =Calculate target/home index absolute errors
+//The signed error determines the correction needed to achieve target position.
+//
+//09Feb16: (STP) v2.45: Calculate the absolute errors for CW/CCW home index as 
+//well. May be required later for "in range" determination.
+      L     #TargetError; // [ Target error
+      ITD   ; // [
+      DTR   ; // [
+      ABS   ; // [
+      TRUNC ; // [ 
+      T     #TargetError_abs; // [ 
+
+      L     #IndexErrorCW; // [ Home index for CW rotation
+      ITD   ; // [ 
+      DTR   ; // [   
+      ABS   ; // [   
+      TRUNC ; // [ 
+      T     #IndexErrorCW_abs; // [ 
+
+      L     #IndexErrorCCW; // [ Home index for CCW rotation
+      ITD   ; // [ 
+      DTR   ; // [ 
+      ABS   ; // [ 
+      TRUNC ; // [ 
+      T     #IndexErrorCCW_abs; // [ 
+
+NETWORK
+TITLE =Indicate in CW home index range
+//v2.45: This indicates whether we are within home index range for the CW counter 
+//value.
+      L     #IndexErrorCW_abs; 
+      L     #Deadband; 
+      <I    ; 
+      =     #IndexRangeCW; 
+NETWORK
+TITLE =Indicate in CW home index range
+//v2.45: This indicates whether we are within home index range for the CCW 
+//counter value.
+      L     #IndexErrorCCW_abs; 
+      L     #Deadband; 
+      <I    ; 
+      =     #IndexRangeCCW; 
+NETWORK
+TITLE =Preact - load preact if not defined
+//The preact value is used from the last bin lookup. If the value is zero we load 
+//the preset supplied by the calling code.
+//14Apr10: (STP) Always calculate preact value.
+      L     #UserConfig.PreActPreset; 
+      T     #PreAct; 
+      NOP   0; 
+NETWORK
+TITLE =Preact - indicate in preact range
+//Determine whether the encoder is within preact range, so the motor can be 
+//stopped without overshooting target. Do not signal preact range while seeking 
+//home because the motor needs to be permitted to run at full speed for this.
+      A     #BinSP_Valid; 
+      AN    #SeekHome; 
+      A(    ; 
+      L     #TargetError_abs; 
+      L     #PreAct; 
+      <I    ; 
+      )     ; 
+      =     #PreactRange; 
+NETWORK
+TITLE =Pos achieved - indicate preliminary position achieved
+//Indicate the target has been achieved, within the deadband, and after a small 
+//delay to ensure no movement takes place.
+//
+//While selecting "no bin" the target is not reloaded thus the current position 
+//remains "achieved".
+//
+//03Feb16: (STP) v2.44: Deviation from previous protocol. Without a valid bin the 
+//position achieved status becomes FALSE so the PLC program can prevent infeed 
+//equipment.
+//09Feb16: (STP) v2.45 determine position achieved based on absolute error.
+      A     #BinSP_Valid; 
+      AN    #SeekHome; 
+      A(    ; 
+      L     #TargetError_abs; 
+      L     #Deadband; 
+      <I    ; 
+      )     ; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_PosAchd (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.PosAchdDly,
+           Q                        := #PosAchd_internal);
+
+      NOP   0; 
+NETWORK
+TITLE =Pos achieved - return selected equipment number
+//The distributor can be at its target count but that does not necessarily match 
+//the user setpoint. For example, the user setpoint can be 0, while the 
+//distributor is actually aligned with a different bin. Technically, the encoder 
+//is positioned where we asked it to be, but we cannot indicate this to the user 
+//as this would allow infeed equipment to run.
+      A(    ; 
+      L     0; 
+      T     #EquipNbrCurrent; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A     #PosAchd_internal; 
+      A(    ; 
+      L     #Equip_SP; 
+      L     #Intern_SP; 
+      ==I   ; 
+      )     ; 
+      JNB   _01a; 
+      L     #Equip_SP; 
+      T     #EquipNbrCurrent; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_01a: A     BR; 
+      =     #PositionAchieved; 
+NETWORK
+TITLE =Motor backspin timer CW
+//Ensure that the motor has come to a full stop before jogging.
+      AN    #MotorStatusFwd; 
+      AN    #MotorStatusRev; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_BS (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.CoastStopTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Jog motor
+//Jog the motor once in preact range but not yet in position. Jog for short time 
+//only. Trigger with the off delay and latch with the jog required contact. Run 
+//while the jog timer has not expired yet.
+      A     #BinSP_Valid; 
+      A     #PreactRange; 
+      AN    #PosAchd_internal; 
+      A(    ; 
+      O     #T_BS.Q; 
+      O     #JogRqd; 
+      )     ; 
+      AN    #T_Jog.Q; 
+      =     #JogRqd; 
+NETWORK
+TITLE =Motor jog timer
+//Start the jog timer to interrupt jogging once the timer expires.
+//
+//09Feb16: (STP) v2.45 Replaced the fixed jog time of T#150MS with manual jog 
+//time.
+      A     #JogRqd; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_Jog (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.ManualJogTime);
+
+      NOP   0; 
+NETWORK
+TITLE =Check if shortest path is clockwise
+//03Feb16: (STP) v2.44: Can now use error to determine rotation needed.
+//09Feb16: (STP) v2.45: Add CW/CCW determination for SeekHome as well.
+//09Feb16: (STP) v2.45: During SeekHome, latch the direction to prevent reversal 
+//if the home index proxy cannot be found.
+//09Feb16: (STP) v2.45: While position has been achieved, interrupt any 
+//forward/reverse request (interferes with SeekHome).
+//09Feb16: (STP) v2.45: When not seeking home, also test for SP>0 or the 
+//direction selected for SeekHome may be incorrect first time after that.
+//10Feb16: (STP) v2.45 During a calibration, force forward movement.
+      A(    ; 
+      AN    #SeekHome; 
+      A     #BinSP_Valid; 
+      AN    #PosAchd_internal; 
+      A(    ; 
+      L     #TargetError; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      O     ; 
+      A     #SeekHome; 
+      AN    #GoReverse; 
+      A(    ; 
+      O(    ; 
+      L     #IndexErrorCW; 
+      L     0; 
+      <I    ; 
+      )     ; 
+      O     #GoForward; 
+      O     #Exec_home_cal; 
+      )     ; 
+      )     ; 
+      AN    #New_SP; 
+      =     #GoForward; 
+NETWORK
+TITLE =Check if shortest path is counter-clockwise
+//03Feb16: (STP) v2.44: Can now use error to determine rotation needed.
+//09Feb16: (STP) v2.45: Add CW/CCW determination for SeekHome as well.
+//09Feb16: (STP) v2.45: During SeekHome, latch the direction to prevent reversal 
+//if the home index proxy cannot be found.
+//09Feb16: (STP) v2.45: While position has been achieved, interrupt any 
+//forward/reverse request (interferes with SeekHome).
+//09Feb16: (STP) v2.45: When not seeking home, also test for SP>0 or the 
+//direction selected for SeekHome may be incorrect first time after that.
+//10Feb16: (STP) v2.45 During a calibration, force forward movement.
+      A(    ; 
+      AN    #SeekHome; 
+      A     #BinSP_Valid; 
+      AN    #PosAchd_internal; 
+      A(    ; 
+      L     #TargetError; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      O     ; 
+      A     #SeekHome; 
+      AN    #Exec_home_cal; 
+      AN    #GoForward; 
+      A(    ; 
+      O(    ; 
+      L     #IndexErrorCW; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      O     #GoReverse; 
+      )     ; 
+      )     ; 
+      AN    #New_SP; 
+      =     #GoReverse; 
+NETWORK
+TITLE =Indicate OK to start
+//Simplify contactor logic by grouping common safeties in one network.
+      AN    #EmergencyStop; 
+      A(    ; 
+      O     #T_BS.Q; 
+      O     #Running_aux; 
+      )     ; 
+      AN    #GeneralFault; 
+      A     #MoveEnable; 
+      =     #OK_to_start; 
+NETWORK
+TITLE =Manual control - Clear when not desired
+//20Feb16: (STP) v2.46: Consolidated two networks.
+//Clear the manual requests if:
+// - Distributor currently not in manual mode.
+// - During a general fault.
+// - If move enable signal is false.
+// - If the OK to start is false (e.g. during the backspin delay).
+      ON    #Manual; 
+      O     #GeneralFault; 
+      ON    #MoveEnable; 
+      ON    #OK_to_start; 
+      R     #ManualRunFwd; 
+      R     #ManualJogFwd; 
+      R     #ManualRunRev; 
+      R     #ManualJogRev; 
+NETWORK
+TITLE =Manual control - Exclude controls
+
+
+      A     #ManualRunFwd; // Run fwd: exclude all others
+//      FP    #ManRunFwd_pls
+      R     #ManualJogFwd; 
+      R     #ManualRunRev; 
+      R     #ManualJogRev; 
+
+      A     #ManualJogFwd; // Jog fwd: exclude all others
+//      FP    #ManJogFwd_pls
+      R     #ManualRunFwd; 
+      R     #ManualRunRev; 
+      R     #ManualJogRev; 
+
+      A     #ManualRunRev; // Run rev: exclude all others
+//      FP    #ManRunRev_pls
+      R     #ManualJogRev; 
+      R     #ManualRunFwd; 
+      R     #ManualJogFwd; 
+
+      A     #ManualJogRev; // Jog rev: exclude all others
+//      FP    #ManJogRev_pls
+      R     #ManualRunRev; 
+      R     #ManualRunFwd; 
+      R     #ManualJogFwd; 
+NETWORK
+TITLE =Manual control - create forward jog pulse
+
+      A(    ; 
+      A     #ManualJogFwd; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_JogFwd (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.ManualJogTime);
+
+      A     BR; 
+      )     ; 
+      A     #T_JogFwd.Q; 
+      R     #ManualJogFwd; 
+NETWORK
+TITLE =Manual control - create reverse jog pulse
+
+      A(    ; 
+      A     #ManualJogRev; 
+      =     L      5.0; 
+      BLD   103; 
+      CALL #T_JogRev (
+           IN                       := L      5.0,
+           PT                       := #UserConfig.ManualJogTime);
+
+      A     BR; 
+      )     ; 
+      A     #T_JogRev.Q; 
+      R     #ManualJogRev; 
+NETWORK
+TITLE =Energize forward contactor
+//22Jan16: v2.43: Prohibit energizing contactors without enable signal.
+//09Feb16: (STP) v2.45: Consolidated two networks.
+//v2.5: Run forward during the initialization.
+      A(    ; 
+      AN    #Manual; 
+      A(    ; 
+      AN    #PosAchd_internal; 
+      A     #GoForward; 
+      A(    ; 
+      O     #JogRqd; 
+      ON    #PreactRange; 
+      )     ; 
+      O     #Exec_init; 
+      )     ; 
+      O     ; 
+      A     #Manual; 
+      A(    ; 
+      O     #ManualRunFwd; 
+      O     #ManualJogFwd; 
+      )     ; 
+      )     ; 
+      AN    #MotorRunRev; 
+      A     #OK_to_start; 
+      =     #MotorRunFwd; 
+NETWORK
+TITLE =Energize reverse contactor
+//22Jan16: v2.43: Prohibit energizing contactors without enable signal.
+//09Feb16: (STP) v2.45: Consolidated two networks.
+//v2.5: Run forward during the initialization.
+      A(    ; 
+      AN    #Manual; 
+      AN    #PosAchd_internal; 
+      A     #GoReverse; 
+      A(    ; 
+      O     #JogRqd; 
+      ON    #PreactRange; 
+      )     ; 
+      O     ; 
+      A     #Manual; 
+      A(    ; 
+      O     #ManualRunRev; 
+      O     #ManualJogRev; 
+      )     ; 
+      )     ; 
+      AN    #Exec_init; 
+      AN    #MotorRunFwd; 
+      A     #OK_to_start; 
+      =     #MotorRunRev; 
+NETWORK
+TITLE =Clear first scan
+
+      A     #UserConfig.First_scan; 
+      R     #UserConfig.First_scan; 
+END_FUNCTION_BLOCK
+
