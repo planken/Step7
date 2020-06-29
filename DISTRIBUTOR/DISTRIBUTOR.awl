@@ -1,11 +1,11 @@
-FUNCTION_BLOCK "DISTR 2.5"
+FUNCTION_BLOCK "DISTR 2.6"
 TITLE =Distributor control FM350-1
 //Distributor control for Hi-Pro Olds for use with S7 FM350-1 counter and 
 //Simatic counter control function.
 AUTHOR : STP
 FAMILY : Motor
 NAME : Distr
-VERSION : 2.5
+VERSION : 2.6
 
 
 VAR_INPUT
@@ -118,6 +118,15 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Comments
+//v2.6:  - No instance data changes.
+//       - Important change to applying the bias. Apply a modulo to the 
+//         resulting biased counter value to ensure the range -2540..+2540.
+//       - Bias comparison used L#0 instead of 0.
+//       - Prevent signalling preact range during initialization cycle.
+//       - Prevent position achieved during initialization cycle.
+//       - Moved Exec_init test from contactor logic to "GoFwd"/"GoRev" logic.
+//         This hopefully addresses the issue where the motor would not stop when 
+//         reversing during the intialization cycle.
 //v2.5:  - THIS IS A CRITICAL BUG FIX.
 //         At power up the FM counter value is zeroed. By rotating until the
 //         Z pulse from the encoder is detected will correct this.
@@ -217,19 +226,21 @@ TITLE =Apply counter bias
 //  This ensures the biased counter value is always in the range 0-2540.
 //
 //21Oct15: (STP) Moved external code inside this FB.
-      L     #FM_count; 
+//10Jul16: (STP) v2.6: Apply a modulo to the resulting biased counter value to 
+//ensure the result always lies within -2540..+2540.
+      L     #FM_count; // Bias raw counter value
       L     #Count_bias; 
       +I    ; 
-      T     #Count_actual; 
-      AN    OV; 
-      SAVE  ; 
-      CLR   ; 
-      A     BR; 
-      =     L      5.0; 
-      A     L      5.0; 
+      ITD   ; 
+      L     L#2540; // Always ensure range -2540..+2540
+      MOD   ; 
+      T     #Count_actual; // Actual counter value to be used
+NETWORK
+TITLE =Handle bias underflow
+
       A(    ; 
       L     #Count_actual; 
-      L     L#0; 
+      L     0; 
       <I    ; 
       )     ; 
       JNB   _001; 
@@ -238,7 +249,9 @@ TITLE =Apply counter bias
       +I    ; 
       T     #Count_actual; 
 _001: NOP   0; 
-      A     L      5.0; 
+NETWORK
+TITLE =Handle bias overflow
+
       A(    ; 
       L     #Count_actual; 
       L     2540; 
@@ -288,6 +301,8 @@ TITLE =Init - Deny cal & seek home *NOT USED*
 //R #UserConfig.Cal_req
 //R #Exec_home_cal
 //R #SeekHome
+
+
 NETWORK
 TITLE =Init - Indicate busy
 
@@ -962,8 +977,11 @@ TITLE =Preact - indicate in preact range
 //Determine whether the encoder is within preact range, so the motor can be 
 //stopped without overshooting target. Do not signal preact range while seeking 
 //home because the motor needs to be permitted to run at full speed for this.
+//
+//29Jun16: (STP) v2.6: Also prevent preact range during initialization cycle.
       A     #BinSP_Valid; 
       AN    #SeekHome; 
+      AN    #Exec_init; 
       A(    ; 
       L     #TargetError_abs; 
       L     #PreAct; 
@@ -982,8 +1000,11 @@ TITLE =Pos achieved - indicate preliminary position achieved
 //position achieved status becomes FALSE so the PLC program can prevent infeed 
 //equipment.
 //09Feb16: (STP) v2.45 determine position achieved based on absolute error.
+//29Jun16: (STP) v2.6: Also prevent position achieved during initialization 
+//cycle.
       A     #BinSP_Valid; 
       AN    #SeekHome; 
+      AN    #Exec_init; 
       A(    ; 
       L     #TargetError_abs; 
       L     #Deadband; 
@@ -1027,7 +1048,7 @@ TITLE =Pos achieved - return selected equipment number
 _01a: A     BR; 
       =     #PositionAchieved; 
 NETWORK
-TITLE =Motor backspin timer CW
+TITLE =Motor backspin timer
 //Ensure that the motor has come to a full stop before jogging.
       AN    #MotorStatusFwd; 
       AN    #MotorStatusRev; 
@@ -1077,6 +1098,7 @@ TITLE =Check if shortest path is clockwise
 //09Feb16: (STP) v2.45: When not seeking home, also test for SP>0 or the 
 //direction selected for SeekHome may be incorrect first time after that.
 //10Feb16: (STP) v2.45 During a calibration, force forward movement.
+//29Jun16: (STP) v2.6: During initialization, force forward movement.
       A(    ; 
       AN    #SeekHome; 
       A     #BinSP_Valid; 
@@ -1100,6 +1122,7 @@ TITLE =Check if shortest path is clockwise
       )     ; 
       )     ; 
       AN    #New_SP; 
+      O     #Exec_init; 
       =     #GoForward; 
 NETWORK
 TITLE =Check if shortest path is counter-clockwise
@@ -1112,6 +1135,7 @@ TITLE =Check if shortest path is counter-clockwise
 //09Feb16: (STP) v2.45: When not seeking home, also test for SP>0 or the 
 //direction selected for SeekHome may be incorrect first time after that.
 //10Feb16: (STP) v2.45 During a calibration, force forward movement.
+//29Jun16: (STP) v2.6: During initialization, force forward movement.
       A(    ; 
       AN    #SeekHome; 
       A     #BinSP_Valid; 
@@ -1135,6 +1159,7 @@ TITLE =Check if shortest path is counter-clockwise
       )     ; 
       )     ; 
       AN    #New_SP; 
+      AN    #Exec_init; 
       =     #GoReverse; 
 NETWORK
 TITLE =Indicate OK to start
@@ -1224,17 +1249,15 @@ NETWORK
 TITLE =Energize forward contactor
 //22Jan16: v2.43: Prohibit energizing contactors without enable signal.
 //09Feb16: (STP) v2.45: Consolidated two networks.
-//v2.5: Run forward during the initialization.
+//04Jun16: (STP) v2.5: Run forward during the initialization.
+//29Jun16: (STP) v2.6: Removed test for initialization.
       A(    ; 
       AN    #Manual; 
-      A(    ; 
       AN    #PosAchd_internal; 
       A     #GoForward; 
       A(    ; 
       O     #JogRqd; 
       ON    #PreactRange; 
-      )     ; 
-      O     #Exec_init; 
       )     ; 
       O     ; 
       A     #Manual; 
@@ -1250,7 +1273,8 @@ NETWORK
 TITLE =Energize reverse contactor
 //22Jan16: v2.43: Prohibit energizing contactors without enable signal.
 //09Feb16: (STP) v2.45: Consolidated two networks.
-//v2.5: Run forward during the initialization.
+//04Jun16: (STP) v2.5: Run forward during the initialization.
+//29Jun16: (STP) v2.6: Removed test for initialization.
       A(    ; 
       AN    #Manual; 
       AN    #PosAchd_internal; 
@@ -1266,7 +1290,6 @@ TITLE =Energize reverse contactor
       O     #ManualJogRev; 
       )     ; 
       )     ; 
-      AN    #Exec_init; 
       AN    #MotorRunFwd; 
       A     #OK_to_start; 
       =     #MotorRunRev; 
