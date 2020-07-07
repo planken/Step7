@@ -1,0 +1,25 @@
+FUNCTION FC 69 : VOID
+TITLE =Flip flop
+AUTHOR : splanken
+NAME : FF
+VERSION : 1.1
+
+
+VAR_IN_OUT
+  In : BOOL ;	
+  Out : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+
+      A     #In; 
+      X     #Out; 
+      =     #Out; 
+
+      SET   ; 
+      R     #In; 
+      SAVE  ; 
+
+END_FUNCTION
+
