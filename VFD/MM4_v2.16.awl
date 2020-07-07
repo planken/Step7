@@ -499,7 +499,7 @@ BEGIN
 NETWORK
 TITLE =Version history
 //v 2.16 24Jan20/STP
-//        - For job 23 load parameer depending on drive type:
+//        - For job 23 load parameter depending on drive type:
 //          MM4:      r2110, index 3, identifier b#16#11 (multi)
 //          Sinamics: r2132, index 0, identified b#16#1  (single)
 //v 2.15 22Jan20/STP
