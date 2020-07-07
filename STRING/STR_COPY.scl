@@ -1,0 +1,20 @@
+
+FUNCTION Str_Copy : void
+
+VAR_INPUT
+    Str_in:STRING;
+END_VAR
+
+VAR_OUTPUT
+    Str_out:STRING;
+end_var
+
+VAR_TEMP
+    // Temporary Variables
+
+END_VAR
+
+    Str_out := Str_in;
+
+END_FUNCTION
+
