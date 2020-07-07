@@ -1,0 +1,36 @@
+FUNCTION FC 68 : VOID
+TITLE =Flip flop with latch
+KNOW_HOW_PROTECT
+AUTHOR : splanken
+VERSION : 1.0
+
+
+VAR_IN_OUT
+  In : BOOL ;	
+  Pls : BOOL ;	
+  In_latch : BOOL ;	
+  Out : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+
+      A     #In; 
+      FP    #Pls; 
+      X     #Out; 
+      =     #Out; 
+
+      A     #Out; 
+      A(    ; 
+      O     #In; 
+      O     #In_latch; 
+      )     ; 
+      =     #In_latch; 
+
+      SET   ; 
+      R     #In; 
+
+      SET   ; 
+      SAVE  ; 
+END_FUNCTION
+
