@@ -1,0 +1,56 @@
+FUNCTION "RUNTIME 1.4" : VOID
+TITLE =RUN TIME COUNTER
+KNOW_HOW_PROTECT
+// Triggered by the enable input a timer starts, counting milliseconds.
+// History:
+// v1.1: Created new input for 1Hz clock pulse.
+// v1.2: Count in milliseconds.
+// v1.3: Count in seconds for increased max value.
+// v1.4: Use OV to detect overflow.
+AUTHOR : STP
+VERSION : 1.4
+
+
+VAR_INPUT
+  CountEnable : BOOL ;	// Enable the counter function
+  ClockPulse_1Hz : BOOL ;	// 1Hz clock pulse
+END_VAR
+VAR_IN_OUT
+  Seconds : DINT ;	//Elapsed time
+  Reset : BOOL ;	// Reset the elapsed time
+END_VAR
+BEGIN
+
+NETWORK
+TITLE =ADJUST TIMER
+
+// Only update the timer when enabled
+      A     #CountEnable; 
+      A     #ClockPulse_1Hz; 
+      JNB   Ja; 
+
+// Increment seconds
+      L     #Seconds; 
+      L     L#1; 
+      +D    ; 
+      T     #Seconds;
+
+// Zero counter on overflow or reset
+Ja: A(;
+O OV;
+O #reset;
+);
+JCN Jb;
+
+L L#0;
+T  #Seconds;
+
+      SET;
+      R #Reset;
+
+// Force ENO
+Jb:SET;
+save;
+
+END_FUNCTION
+
