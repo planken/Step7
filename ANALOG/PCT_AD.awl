@@ -1,0 +1,112 @@
+FUNCTION "PCT_AD 2.0P" : VOID
+TITLE =PCT_AD
+KNOW_HOW_PROTECT
+//Convert a pseudo percentage 0-100 to an A/D value.
+AUTHOR : splanken
+VERSION : 2.0
+
+
+VAR_INPUT
+  Pct_in : ANY ;	//Pseudo percentage 0.0..100.0
+  AD_LL : INT ;	//A/D value lower limit
+  AD_UL : INT ;	//A/D value upper limit
+END_VAR
+VAR_OUTPUT
+  AD_out : INT ;	//A/D value out
+END_VAR
+VAR_TEMP
+  In_int : BOOL ;	
+  In_real : BOOL ;	
+  In_DB : INT ;	
+  AD_span : REAL ;	
+  Pct_in_2 : REAL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+
+      L     P##Pct_in; 
+      LAR1  ; 
+
+      L     B [AR1,P#1.0]; // Check if destination is INT
+      L     5; 
+      ==I   ; 
+      =     #In_int; 
+
+      L     B [AR1,P#1.0]; // Check if destination is REAL
+      L     8; 
+      ==I   ; 
+      =     #In_real; 
+
+      L     W [AR1,P#4.0]; // Obtain DB nbr
+      T     #In_DB; 
+
+      OPN   DB [#In_DB]; // Open DB
+      L     D [AR1,P#6.0]; // Obtain 4-byte value
+      LAR1  ; 
+
+      A     #In_int; 
+      JC    in_i; 
+
+      A     #In_real; 
+      JC    in_r; 
+
+      L     0.000000e+000; // load 0.0 if neither real/int
+      JU    in_x; 
+
+in_r: L     D [AR1,P#0.0]; // Load real value
+      JU    in_x; 
+
+in_i: L     W [AR1,P#0.0]; // Load int value + convert to real
+      ITD   ; 
+      DTR   ; 
+      JU    in_x; 
+
+NETWORK
+TITLE =
+
+// Limit percentage 0-100
+
+in_x: T     #Pct_in_2; 
+      L     0.000000e+000; 
+      <R    ; 
+      JCN   N2A; 
+      L     0.000000e+000; 
+      T     #Pct_in_2; 
+
+N2A:  L     #Pct_in_2; 
+      L     1.000000e+002; 
+      >R    ; 
+      JCN   N2B; 
+      L     1.000000e+002; 
+      T     #Pct_in_2; 
+
+//Based on the calculation:
+//AD_Out = ((Scaled_in-Scale_LL)/(Scale_UL-Scale_LL)) * (K2-K1) + K1
+
+N2B:  L     #AD_UL; 
+      L     #AD_LL; 
+      -I    ; 
+      ITD   ; 
+      DTR   ; 
+      T     #AD_span; 
+
+// Obtain A/D output value
+
+      L     #Pct_in_2; 
+      L     1.000000e+002; 
+      /R    ; 
+      L     #AD_span; 
+      *R    ; 
+      RND   ; 
+      L     #AD_LL; 
+      +I    ; 
+      T     #AD_out; 
+
+NETWORK
+TITLE =
+
+      SET   ; 
+      SAVE  ; 
+END_FUNCTION
+
