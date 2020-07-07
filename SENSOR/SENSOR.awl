@@ -1,0 +1,80 @@
+FUNCTION_BLOCK FB 251
+TITLE =Sensor input
+KNOW_HOW_PROTECT
+//INTERPRET A SENSOR INPUT AND RAISE AND CLEAR AN AALRM AFTER A SET DELAY.
+//
+//*** REPLACE THE CLOCK PULSES ***
+//
+//v3.1: Changed FC into FB.
+//v3.0: Use TIME tag types.
+AUTHOR : STP
+VERSION : 3.1
+
+
+VAR_INPUT
+  Input : BOOL ;	
+  Active_high : BOOL ;	
+  On_delay : TIME ;	
+  Off_delay : TIME ;	
+END_VAR
+VAR_OUTPUT
+  Output : BOOL ;	
+END_VAR
+VAR
+  On_accu : TIME ;	
+  Off_accu : TIME ;	
+  T_InputOn : SFB 4;	
+  T_InputOff : SFB 4;	
+END_VAR
+VAR_TEMP
+  Input_active : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =INTERPRET SENSOR INPUT LEVEL
+//We can have an input that is active high or active low. Here we set the 
+//conditions as to what is considered an active input.
+      A     #Input; 
+      A     #Active_high; 
+      O     ; 
+      AN    #Input; 
+      AN    #Active_high; 
+      =     #Input_active; 
+NETWORK
+TITLE =Set output after ON time expired
+//If the input is considered active start accumulating the ON time.
+      A(    ; 
+      A     #Input_active; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_InputOn (
+           IN                       := L      1.0,
+           PT                       := #On_delay);
+
+      A     BR; 
+      )     ; 
+      A     #T_InputOn.Q; 
+      S     #Output; 
+NETWORK
+TITLE =Reset output after OFF time expired
+//If the input is considered active start accumulating the ON time.
+      A(    ; 
+      AN    #Input_active; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_InputOff (
+           IN                       := L      1.0,
+           PT                       := #Off_delay);
+
+      A     BR; 
+      )     ; 
+      A     #T_InputOff.Q; 
+      R     #Output; 
+NETWORK
+TITLE =
+
+      SET   ; 
+      SAVE  ; 
+
+END_FUNCTION_BLOCK
+
