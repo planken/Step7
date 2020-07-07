@@ -1,0 +1,164 @@
+FUNCTION_BLOCK "Actuator v2.1"
+TITLE =Single or dual actuator
+//Single: use SV_O output. Dual: use separate SV_O and SV_C outputs.
+AUTHOR : splanken
+VERSION : 2.1
+
+
+VAR_INPUT
+  Auto_act : BOOL ;	//Auto mode actuating permissive
+  Manual_act : BOOL ;	//Manual mode actuating permissive
+  Manual_mode : BOOL ;	//Auto/manual mode
+  Alarm_auto_reset : BOOL ;	//Reset alarm if limit reached after timeout
+  Alarm_reset : BOOL ;	//Reset alarm
+  Is_dual : BOOL ;	//0=Use EQ_SV_O for open; 1=use EQ_SV_O for open & EQ_SV_C for close
+  EQ_ZO : BOOL ;	//Limit sensor for open
+  EQ_ZC : BOOL ;	//Limit sensor for close
+  Open_time : TIME ;	//Maximum open travel time
+  Close_time : TIME ;	//Maximum close travel time
+END_VAR
+VAR_OUTPUT
+  ZO : BOOL ;	//Open status for HMI
+  ZC : BOOL ;	//Closed status for HMI
+  EQ_SV_O : BOOL ;	//Solenoid for opening (single/dual action)
+  EQ_SV_C : BOOL ;	//Solenoid for closing (dual actuators only)
+  Alarm_open : BOOL ;	//Open cycle timed out
+  Alarm_close : BOOL ;	//Close cycle timed out
+  Alarm_general : BOOL ;	//Combined alarm
+END_VAR
+VAR
+  T_open : "TON";	//Open traveling timer
+  T_close : "TON";	//Close traveling timer
+  Alarm : STRUCT 	
+   Open : BOOL ;	//Internal alarm
+   Close : BOOL ;	//Internal alarm
+  END_STRUCT ;	
+END_VAR
+VAR_TEMP
+  t_SV_O : BOOL ;	
+  t_SV_C : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Energize open solenoid
+
+      A(    ; 
+      AN    #Manual_mode; 
+      A     #Auto_act; 
+      O     ; 
+      A     #Manual_mode; 
+      A     #Manual_act; 
+      )     ; 
+      A(    ; 
+      ON    #EQ_ZO; 
+      ON    #Is_dual; 
+      )     ; 
+      =     #EQ_SV_O; 
+      =     #t_SV_O; 
+NETWORK
+TITLE =Energize close solenoid
+
+      A(    ; 
+      AN    #Manual_mode; 
+      AN    #Auto_act; 
+      O     ; 
+      A     #Manual_mode; 
+      AN    #Manual_act; 
+      )     ; 
+      AN    #EQ_ZC; 
+      AN    #t_SV_O; 
+      A     #Is_dual; 
+      =     #EQ_SV_C; 
+      =     #t_SV_C; 
+NETWORK
+TITLE =Indicate open status achieved
+
+      A     #EQ_ZO; 
+      =     #ZO; 
+NETWORK
+TITLE =Indicate closed status achieved
+
+      A     #EQ_ZC; 
+      =     #ZC; 
+NETWORK
+TITLE =Monitor open traveling time
+//Dual-action: monitor open solenoid time.
+//Single-action: monitor solenoid open time if not open. (With a single-action 
+//solenoid we keep the coil energized).
+      A(    ; 
+      A     #Is_dual; 
+      A     #t_SV_O; 
+      O     ; 
+      AN    #Is_dual; 
+      A     #t_SV_O; 
+      AN    #EQ_ZO; 
+      )     ; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_open (
+           IN                       := L      1.0,
+           PT                       := #Open_time,
+           Q                        := #Alarm.Open);
+
+      NOP   0; 
+NETWORK
+TITLE =Monitor close traveling time
+//Dual-action: monitor closing solenoid time.
+//Single-action: monitor time with solenoid de-energized and closed not reached.
+      A(    ; 
+      O     #t_SV_C; 
+      O     ; 
+      AN    #Is_dual; 
+      AN    #t_SV_O; 
+      AN    #EQ_ZC; 
+      )     ; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_close (
+           IN                       := L      1.0,
+           PT                       := #Close_time,
+           Q                        := #Alarm.Close);
+
+      NOP   0; 
+NETWORK
+TITLE =Alarm: opening alarm
+
+      A(    ; 
+      O     #Alarm.Open; 
+      O     ; 
+      A     #EQ_ZC; 
+      A     #EQ_ZO; 
+      O     ; 
+      A     #Alarm_open; 
+      AN    #Alarm_auto_reset; 
+      )     ; 
+      AN    #Alarm_reset; 
+      =     #Alarm_open; 
+NETWORK
+TITLE =Alarm: closing alarm
+
+      A(    ; 
+      O     #Alarm.Close; 
+      O     ; 
+      A     #EQ_ZC; 
+      A     #EQ_ZO; 
+      O     ; 
+      A     #Alarm_close; 
+      AN    #Alarm_auto_reset; 
+      )     ; 
+      AN    #Alarm_reset; 
+      =     #Alarm_close; 
+NETWORK
+TITLE =Alarm: combined
+
+      O     #Alarm_open; 
+      O     #Alarm_close; 
+      =     #Alarm_general; 
+NETWORK
+TITLE =Return ENO
+
+      O     #EQ_ZO; 
+      O     #EQ_ZC; 
+      SAVE  ; 
+END_FUNCTION_BLOCK
+
