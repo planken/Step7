@@ -1,0 +1,111 @@
+FUNCTION "ADCHK v1.1P" : VOID
+TITLE =Validate analog A/D value
+KNOW_HOW_PROTECT
+//Verify A/D value validity: detect undershoot/underrange, overshhot/overrange.
+AUTHOR : STP
+VERSION : 1.1
+
+
+VAR_INPUT
+  AD : INT ;	//Input signal from A/D converter
+  BI : BOOL ;	//0=Unipolar; 1=Bipolar
+END_VAR
+VAR_OUTPUT
+  OFL : BOOL ;	//A/D signal overflow range
+  OST : BOOL ;	//A/D signal overshoot range
+  NORM : BOOL ;	//A/D signal in normal range
+  UST : BOOL ;	//A/D signal undershoot range
+  UFL : BOOL ;	//A/D signal underflow range
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+
+      L     #AD; 
+      L     W#16#7FFF; 
+      ==I   ; 
+      =     #OFL; 
+NETWORK
+TITLE =
+
+      A(    ; 
+      L     #AD; 
+      L     27649; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #AD; 
+      L     32766; 
+      <=I   ; 
+      )     ; 
+      =     #OST; 
+NETWORK
+TITLE =
+
+      A     #BI; 
+      A(    ; 
+      L     #AD; 
+      L     -27648; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #AD; 
+      L     27648; 
+      <=I   ; 
+      )     ; 
+      O     ; 
+      AN    #BI; 
+      A(    ; 
+      L     #AD; 
+      L     0; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #AD; 
+      L     27648; 
+      <=I   ; 
+      )     ; 
+      =     #NORM; 
+NETWORK
+TITLE =
+
+      A     #BI; 
+      A(    ; 
+      L     #AD; 
+      L     -32767; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #AD; 
+      L     -27649; 
+      <=I   ; 
+      )     ; 
+      O     ; 
+      AN    #BI; 
+      A(    ; 
+      L     #AD; 
+      L     -32767; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #AD; 
+      L     -1; 
+      <=I   ; 
+      )     ; 
+      =     #UST; 
+NETWORK
+TITLE =
+
+      L     #AD; 
+      L     -32768; 
+      ==I   ; 
+      =     #UFL; 
+NETWORK
+TITLE =Force ENO
+
+      SET   ; 
+      SAVE  ; 
+
+END_FUNCTION
+
+
