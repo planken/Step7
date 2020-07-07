@@ -1,0 +1,113 @@
+FUNCTION_BLOCK FB 273
+TITLE =Read and convert RTD value
+KNOW_HOW_PROTECT
+//Convert raw Pt100 to proper temperature. If A/D value is invalid the last known 
+//valid value is used. After a maximum delay the substitution value is written 
+//instead and an alarm is written.
+//
+//v1.2: Added value substitution with last valid value for max time.
+//v1.1: Added value substitution.
+AUTHOR : splanken
+FAMILY : ANALOG
+NAME : RTD
+VERSION : 1.2
+
+
+VAR_INPUT
+  AD : INT ;	//Raw RTD value
+  Subst : BOOL ;	//Substitute with last good value if invalid?
+  Subst_delay : TIME ;	
+END_VAR
+VAR_OUTPUT
+  AD_invalid : BOOL ;	
+  TE_out : REAL ;	
+END_VAR
+VAR
+  AD_tmp : INT ;	
+  AD_last : INT ;	
+  AD_Invalid_tmp : BOOL ;	
+  T_Invalid : SFB 4;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Indicate PIW is in normal operating range
+//RTD Pt100 is bipolar, range is -27648 .. +27648
+      O(    ; 
+      L     #AD; 
+      L     27648; 
+      >=I   ; 
+      )     ; 
+      O(    ; 
+      L     #AD; 
+      L     -27648; 
+      <=I   ; 
+      )     ; 
+      =     #AD_Invalid_tmp; 
+NETWORK
+TITLE =Store AD value to temp word
+
+      L     #AD; 
+      T     #AD_tmp; 
+      NOP   0; 
+NETWORK
+TITLE =Store last valid AD value
+
+      AN    #AD_Invalid_tmp; 
+      JNB   _001; 
+      L     #AD; 
+      T     #AD_last; 
+_001: NOP   0; 
+NETWORK
+TITLE =Substitute if invalid
+//If the signal is invalid within the maximum delay defined, the last known value 
+//is written. Once the delay timer expired the substitution value is written 
+//instead and the alarm is written to the output.
+      A(    ; 
+      A     #AD_Invalid_tmp; 
+      A     #Subst; 
+      JNB   _002; 
+      L     #AD_last; 
+      T     #AD_tmp; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_002: A     BR; 
+      )     ; 
+      A     #T_Invalid.Q; 
+      JNB   _003; 
+      L     0; 
+      T     #AD_tmp; 
+_003: NOP   0; 
+NETWORK
+TITLE =Delay fault
+
+      A(    ; 
+      A     #AD_Invalid_tmp; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #T_Invalid (
+           IN                       := L      0.0,
+           PT                       := #Subst_delay);
+
+      A     BR; 
+      )     ; 
+      A     #T_Invalid.Q; 
+      =     #AD_invalid; 
+NETWORK
+TITLE =Convert Pt100 to temperature
+
+      L     #AD_tmp; 
+      ITD   ; 
+      DTR   ; 
+      L     1.000000e+002; 
+      /R    ; 
+      T     #TE_out; 
+
+NETWORK
+TITLE =Set ENO
+
+      SET   ; 
+      SAVE  ; 
+
+END_FUNCTION_BLOCK
+
