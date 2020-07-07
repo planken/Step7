@@ -1,0 +1,374 @@
+FUNCTION_BLOCK FB 608
+TITLE =Sekundenwandler / Second Converter
+KNOW_HOW_PROTECT
+//v1.5: (04Mar20) Corrected sring header addressing (using DIB instead of B).
+//v1.4: (07Feb19) Recompiled with valid version decimal.
+//v1.33: (30Nov15) Changed #hours data type from INT to DINT and changed limits 
+//to 99999h99m99s or 99d23h59m59s.
+//v1.32: (27Nov15) Made the following kick-ass changes:
+//(a) Change output string length from 11 to 12 for Step 7 classic.
+//(b) Added option to show days (either DD:HH:MM:SS or HHHHH:MM:SS).
+//(c) Limited max number of seconds (depending on selected format).
+//v1.31: (27Nov15) Change output string length from 11 to 12 for Step 7 classic.
+//v1.3: (11May15) Omit parts not needed.
+//v1.2: Rewrote math for days/hours/minutes, eliminating the loops.
+//      Moved all intermediate data to TEMP area.
+//v1.1 15Oct14 (STP): Corrected the byte sequence. Moved the time components 
+//      to the STAT area. Shortened the output string from 14 to 12 chars.
+//
+//Pass a time value as number of seconds and return a formatted string 
+//"dd:hh:mm:ss". If days or hours are not needed they will be omitted (but string 
+//length will alway be the same).
+AUTHOR : splanken
+VERSION : 1.5
+
+
+VAR_INPUT
+  Seconds : DINT ;	//Nbr of seconds to be converted
+  Show_days : BOOL ;	//Select format: 1=dd:hh:mm:ss (max 32767 hrs) 0=hhhhh:mm:ss (max 99 days)
+END_VAR
+VAR_OUTPUT
+  TimeString : STRING  [12 ];	//Timestring in selected format
+END_VAR
+VAR_TEMP
+  sDiValue : DINT ;	
+  sWoLoop : WORD ;	
+  TmpDint : DINT ;	
+  days : INT ;	
+  hours : DINT ;	
+  min : INT ;	
+  sec : INT ;	
+  TmpInt : INT ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Init
+//Reset all values
+      L     #Seconds; 
+      T     #sDiValue; 
+
+      L     0; 
+      T     #days; 
+      T     #min; 
+      T     #sec; 
+
+      L     L#0; 
+      T     #hours; 
+
+NETWORK
+TITLE =Range checks
+
+// For the format hhhhh:mm:ss limit the maximum inout to 359,999,999 = 99999:59:59
+// For the format dd:hh:mm:ss limit the maximum to 2,073,599
+// (It is almost more useful to select between omitting nbr of seconds)
+
+      A     #Show_days; 
+      JC    C1; 
+
+      L     #Seconds; 
+      L     L#359999999; // 359,999,999 = 99999h 59m 59s
+      <=D   ; 
+      JCN   N2X; 
+      JU    C2; 
+
+C1:   L     #Seconds; 
+      L     L#2073599; // 2,073,599 = 99d 23h 59m 59s
+      <=D   ; 
+      JCN   N2X; 
+
+C2:   NOP   0; 
+NETWORK
+TITLE =Calculate nbr of days/hours/min/sec
+//Calculation of days, hours, minutes and seconds
+//
+//29Apr15: (STP) Complete rewrite; the Siemens code used idiotic loops.
+      L     #sDiValue; // Calculate whole days
+      L     L#86400; 
+      /D    ; 
+      T     #days; 
+
+      L     #sDiValue; // ..remainder is hours
+      L     L#86400; 
+      MOD   ; 
+      T     #TmpDint; 
+
+      L     L#3600; // Calculate whole hours
+      /D    ; 
+      T     #hours; 
+
+// --------------------------------------
+// If not showing days, add days to hours
+
+      A     #Show_days; 
+      JC    N2a; 
+
+      L     #days; 
+      L     L#24; 
+      *D    ; 
+      L     #hours; 
+      +D    ; 
+      T     #hours; 
+
+      L     0; 
+      T     #days; 
+
+N2a:  NOP   0; 
+
+// --------------------------------------
+
+      L     #TmpDint; 
+      L     L#3600; 
+      MOD   ; 
+      T     #TmpDint; // ..remainder is minutes
+
+      L     L#60; // Calculate whole minutes
+      /D    ; 
+      T     #min; 
+
+      L     #TmpDint; // ..remainder is seconds
+      L     L#60; 
+      MOD   ; 
+      T     #sec; 
+
+N2X:  NOP   0; 
+NETWORK
+TITLE =Write string MM:SS
+//Format
+//
+// D   D   :   H   H   :   M   M   :   S    S      Show_days=2#1
+// 1 - 2 - 3 - 4 - 5 - 6 - 7 - 8 - 9 - 10 - 11     Character#
+// H   H   H   H   H   :   M   M   :   S    S      Show_days=2#0
+// --------------------------------------------------
+// Write "MM:SS" (always show these)
+// --------------------------------------------------
+
+      L     #sec; // Seconds (1)
+      L     10; 
+      MOD   ; 
+      L     48; 
+      +I    ; 
+      T     #TimeString[11]; 
+
+      L     #sec; // Seconds (10)
+      L     10; 
+      /I    ; 
+      L     48; 
+      +I    ; 
+      T     #TimeString[10]; 
+
+      L     ':'; 
+      T     #TimeString[9]; 
+
+      L     #min; // Minutes (1)
+      L     10; 
+      MOD   ; 
+      L     48; 
+      +I    ; 
+      T     #TimeString[8]; 
+
+      L     #min; // Minutes (10)
+      L     10; 
+      /I    ; 
+      L     48; 
+      +I    ; 
+      T     #TimeString[7]; 
+
+NETWORK
+TITLE =Blank first 6 characters
+//Format
+//
+// D   D   :   H   H   :   M   M   :   S    S      Show_days=2#1
+// 1 - 2 - 3 - 4 - 5 - 6 - 7 - 8 - 9 - 10 - 11     Character#
+// H   H   H   H   H   :   M   M   :   S    S      Show_days=2#0
+      L     ' '; 
+      T     #TimeString[1]; // "D"
+      T     #TimeString[2]; // "D"
+      T     #TimeString[3]; // ":"
+      T     #TimeString[4]; // "H"
+      T     #TimeString[5]; // "H"
+      T     #TimeString[6]; // ":"
+
+      L     #hours; 
+      L     #days; 
+      ITD   ; 
+      +D    ; 
+      L     L#0; 
+      >D    ; 
+      JCN   N3x; 
+
+      L     ':'; 
+      T     #TimeString[6]; 
+
+NETWORK
+TITLE =Write characters 1-6 for Show_days = false
+//Format
+//
+// D   D   :   H   H   :   M   M   :   S    S      Show_days=2#1
+// 1 - 2 - 3 - 4 - 5 - 6 - 7 - 8 - 9 - 10 - 11     Character#
+// H   H   H   H   H   :   M   M   :   S    S      Show_days=2#0
+      A     #Show_days; 
+      JC    N3k; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+      L     #hours; // write hours (1)
+      L     L#10; 
+      MOD   ; 
+      L     L#48; 
+      +D    ; 
+      T     #TimeString[5]; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+      L     #hours; 
+      L     L#9; 
+      >D    ; 
+      JCN   N3x; 
+      L     #hours; // write hours (10)
+      L     L#10; 
+      /D    ; 
+      T     #TmpInt; 
+      L     #TmpInt; 
+      L     L#10; 
+      MOD   ; 
+      L     L#48; 
+      +D    ; 
+      T     #TimeString[4]; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+      L     #hours; 
+      L     L#99; 
+      >D    ; 
+      JCN   N3x; 
+      L     #hours; // write hours (100)
+      L     L#100; 
+      /D    ; 
+      T     #TmpInt; 
+      L     #TmpInt; 
+      L     L#10; 
+      MOD   ; 
+      L     L#48; 
+      +D    ; 
+      T     #TimeString[3]; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+      L     #hours; 
+      L     L#999; 
+      >D    ; 
+      JCN   N3x; 
+      L     #hours; // write hours (1,000)
+      L     L#1000; 
+      /D    ; 
+      T     #TmpInt; 
+      L     #TmpInt; 
+      L     L#10; 
+      MOD   ; 
+      L     L#48; 
+      +D    ; 
+      T     #TimeString[2]; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+      L     #hours; 
+      L     L#9999; 
+      >D    ; 
+      JCN   N3x; 
+      L     #hours; // write hours (10,000)
+      L     L#10000; 
+      /D    ; 
+      T     #TmpInt; 
+      L     #TmpInt; 
+      L     L#10; 
+      MOD   ; 
+      L     L#48; 
+      +D    ; 
+      T     #TimeString[1]; 
+
+NETWORK
+TITLE =Write characters 1-6 for Show_days = true
+//Format
+//
+// D   D   :   H   H   :   M   M   :   S    S      Show_days=2#1
+// 1 - 2 - 3 - 4 - 5 - 6 - 7 - 8 - 9 - 10 - 11     Character#
+// H   H   H   H   H   :   M   M   :   S    S      Show_days=2#0
+N3k:  AN    #Show_days; 
+      JC    N3x; 
+
+// --------------------------------------------------
+// Write "HH:"
+// --------------------------------------------------
+
+      L     #hours; // Hours (1)
+      L     L#10; 
+      MOD   ; 
+      L     L#48; 
+      +D    ; 
+      T     #TimeString[5]; 
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+      L     #hours; // Hours (10)
+      L     L#10; 
+      /D    ; 
+      L     L#48; 
+      +D    ; 
+      T     #TimeString[4]; 
+
+      L     ':'; 
+      T     #TimeString[6]; 
+
+// --------------------------------------------------
+// Write "DD:" (only if needed)
+// --------------------------------------------------
+
+      L     #days; // Omit if DD zero
+      L     0; 
+      >I    ; 
+      JC    N3d; 
+
+// Write blanks if DD = 0
+      L     ' '; 
+      T     #TimeString[1]; // "D"
+      T     #TimeString[2]; // "D"
+      T     #TimeString[3]; // ":"
+      JU    N3x; // Done
+
+// Write DD
+N3d:  L     #days; // Days (1)
+      L     10; 
+      MOD   ; 
+      L     48; 
+      +I    ; 
+      T     #TimeString[2]; 
+
+      L     #days; // Days (10)
+      L     10; 
+      /I    ; 
+      L     48; 
+      +I    ; 
+      T     #TimeString[1]; 
+
+      L     ':'; 
+      T     #TimeString[3]; 
+
+N3x:  NOP   0; 
+
+
+
+NETWORK
+TITLE =Force string header
+
+// Write string header
+      LAR1  P##TimeString; 
+      L     12; 
+      T     DIB [AR1,P#0.0]; // Write max length of string
+      L     11; 
+      T     DIB [AR1,P#1.0]; // Write actual length of string
+
+// Force ENO
+      SET   ; 
+      SAVE  ; 
+END_FUNCTION_BLOCK
+
