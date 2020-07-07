@@ -1,0 +1,279 @@
+TYPE "Sirius_DataSet92"
+AUTHOR : STP
+VERSION : 1.0
+
+
+  STRUCT 	
+   Ready : BOOL ;	//#0.0: 1=Device ready for PLC operation
+   MotorCW : BOOL ;	//#0.1: Contact block 1, motor right rotation
+   MotorCCW : BOOL ;	//#0.2: Contact block 2, motor left rotation
+   CntBl_Ovrload : BOOL ;	//#0.3: ALARM: Contact block overload
+   CntBl_Damage : BOOL ;	//#0.4: ALARM: Contact block damaged
+   EmergStrtAct : BOOL ;	//#0.5: Emergency start active
+   GrpError : BOOL ;	//#0.6: ALARM: Group error
+   GrpWarn : BOOL ;	//#0.7: WARNING: Group warning
+   Reserved_1_0 : BOOL ;	//#1.0
+   NoMains : BOOL ;	//#1.1: ALARM: No main power
+   Reserved_1_2 : BOOL ;	//#1.2
+   Starting : BOOL ;	//#1.3: Starting mode active
+   Stopping : BOOL ;	//#1.4: Stopping mode active
+   Reserved_1_5 : BOOL ;	//#1.5
+   ElBraking : BOOL ;	//#1.6: Electrical braking active
+   SlowSpeedOn : BOOL ;	//#1.7: Slow speed mode active
+   TempOvrLoad : BOOL ;	//#2.0: ALARM: Temperature sensor overload
+   TempOpen : BOOL ;	//#2.1: ALARM: Temperature sensor open
+   TempShort : BOOL ;	//#2.2: ALARM: Temperature sensor short circuit
+   ThermOvrLoad : BOOL ;	//#2.3: ALARM: Thermal motor model overload
+   OvrLoadFlt : BOOL ;	//#2.4: ALARM: Motor switched off due to overload
+   Idle : BOOL ;	//#2.5: Idle time active
+   Cooling : BOOL ;	//#2.6: Cooling time active
+   Reserved_2_7 : BOOL ;	//#2.7
+   Reserved_3_0 : BOOL ;	//#3.0
+   Reserved_3_1 : BOOL ;	//#3.1
+   Reserved_3_2 : BOOL ;	//#3.2
+   Reserved_3_3 : BOOL ;	//#3.3
+   Reserved_3_4 : BOOL ;	//#3.4
+   Reserved_3_5 : BOOL ;	//#3.5
+   Reserved_3_6 : BOOL ;	//#3.6
+   ControlInputs : BOOL ;	//#3.7: Device controlled by inputs
+   AsymmWarn : BOOL ;	//#4.0: WARNING: Asymmetry recognized
+   AsymmFlt : BOOL ;	//#4.1: ALARM: Asymmetry fault
+   HiAmp : BOOL ;	//#4.2: WARNING: Current limit exceeded
+   Amp_LL : BOOL ;	//#4.3: Current limit undershot
+   AmpFlt : BOOL ;	//#4.4: ALARM: Motor shut off due to current limit problem
+   Reserved_4_5 : BOOL ;	//#4.5
+   Reserved_4_6 : BOOL ;	//#4.6
+   StallFlt : BOOL ;	//#4.7: ALARM: Motor stall fault
+   Input1 : BOOL ;	//#5.0: Input 1 active
+   Input2 : BOOL ;	//#5.1: Input 2 active
+   Input3 : BOOL ;	//#5.2: Input 3 active
+   Input4 : BOOL ;	//#5.3: Input 4 active
+   Reserved_5_4 : BOOL ;	//$5.4
+   Reserved_5_5 : BOOL ;	//#5.5
+   Reserved_5_6 : BOOL ;	//#5.6
+   Reserved_5_7 : BOOL ;	//#5.7
+   Ground : BOOL ;	//#6.0: WARNING: Ground fault
+   GroundFlt : BOOL ;	//#6.1 ALARM: Motor shut down by ground fault
+   QuickStopOn : BOOL ;	//#6.2: Quick stop active
+   Reserved_6_3 : BOOL ;	//#6.3
+   TripRstOn : BOOL ;	//#6.4: Trip reset active
+   TripRstInhib : BOOL ;	//#6.5: Trip reset inhibited (active alarm, etc)
+   MaxPtrDel : BOOL ;	//#6.6: Maximum pointer deleted
+   CtrlVoltLow : BOOL ;	//#6.7: WARNING: Control supply voltage low
+   BusError : BOOL ;	//#7.0: WARNING: Bus error (DP watchdog activated)
+   PLC_Stop : BOOL ;	//#7.1: WARNING: CPU in STOP mode
+   PLC_AutMode : BOOL ;	//#7.2: Device is under PLC control
+   PLC_ManMode : BOOL ;	//#7.3: Device under manual O&M control via Profibus
+   Local_ManMode : BOOL ;	//#7.4: Device under local O&M control
+   Reserved_7_5 : BOOL ;	//#7.5
+   LocMan_Comms : BOOL ;	//#7.6: WARNING: Comms interrupted during manual local operation
+   PLC_PI_Flt : BOOL ;	//#7.7: WARNING: Process image error
+   ParmConfigOn : BOOL ;	//#8.0: Parameterization active
+   ParmValErr : BOOL ;	//#8.1: Parameter value error, causes switch off at start
+   ParmInhib : BOOL ;	//#8.2: Parameter change not possible during run, causes STOP
+   Parm_PLC_Off : BOOL ;	//#8.3: Parameters from PLC are ignored
+   Res_8_4 : BOOL ;	//#8.4
+   Res_8_5 : BOOL ;	//#8.5
+   Res_8_6 : BOOL ;	//#8.6
+   Res_8_7 : BOOL ;	//#8.7
+   Res_9_0 : BOOL ;	//#9.0
+   Res_9_1 : BOOL ;	//#9.1
+   Res_9_2 : BOOL ;	//#9.2
+   FactoryRst : BOOL ;	//#9.3: factory settings restored
+   Res_9_4 : BOOL ;	//#9.4
+   Res_9_5 : BOOL ;	//#9.5
+   Res_9_6 : BOOL ;	//#9.6
+   Res_9_7 : BOOL ;	//#9.7
+   ParmNbrErr_L : BYTE ;	//#10: Faulty parameter number (LSB)
+   ParmNbrErr_H : BYTE ;	//#11: Faulty parameter number (HSB)
+   Res_12_0 : BOOL ;	//#12.0
+   Res_12_1 : BOOL ;	//#12.1
+   ClassErr : BOOL ;	//#12.2: Impermissible class settings
+   Res_12_3 : BOOL ;	//#12.3
+   Reds_12_4 : BOOL ;	//#12.4
+   Res_12_5 : BOOL ;	//#12.5
+   Res_12_6 : BOOL ;	//#12.6
+   Res_12_7 : BOOL ;	//#12.7
+   ParmSet1 : BOOL ;	//#13.0: Parameter set 1 active
+   ParmSet2 : BOOL ;	//#13.1: Parameter set 2 active
+   ParmSet3 : BOOL ;	//#13.2: Parameter set 3 active
+   Res_13_3 : BOOL ;	//#13.3
+   ParmSetChgErr : BOOL ;	//#13.4: Impermissible change of parameter set
+   Res_13_5 : BOOL ;	//#13.5
+   Res_13_6 : BOOL ;	//#13.6
+   Res_13_7 : BOOL ;	//#13.7
+   Res_14_0 : BOOL ;	//#14.0
+   Res_14_1 : BOOL ;	//#14.1
+   MtrHeatMode : BOOL ;	//#14.2: Motor heating active
+   DCbrakeMode : BOOL ;	//#14.3: DC brake mode active
+   DynBrakeMode : BOOL ;	//#14.4: Dynamic DC brake mode active
+   MtrConStarDelta : BOOL ;	//#14.5: Motor configured as star/delta
+   MtrConInDelta : BOOL ;	//#14.6: Motor configured as inside delta
+   MtrConUnkn : BOOL ;	//#14.7: Motor connection unknown
+   NoLoad : BOOL ;	//#15.0: No load
+   Res_15_1 : BOOL ;	//#15.1
+   Loss_L1 : BOOL ;	//#15.2: ALARM: Loss of phase 1
+   Loss_L2 : BOOL ;	//#15.3: ALARM: Loss of phase 2
+   Loss_L3 : BOOL ;	//#15.4: ALARM: Loss of phase 3
+   Line_CW : BOOL ;	//#15.5: Line phase direction right
+   Line_CCW : BOOL ;	//#15.6: Line phase direction left
+   Res_15_7 : BOOL ;	//#15.7
+   Res_16 : BYTE ;	//#16
+   Ouput1 : BOOL ;	//#17.0: Output 1 active
+   Output2 : BOOL ;	//#17.1: Output 2 active
+   Output3 : BOOL ;	//#17.2: Output 3 active
+   Output4 : BOOL ;	//#17.3: Output 4 active
+   Res_14_4 : BOOL ;	//#17.4
+   Res_14_5 : BOOL ;	//#17.5
+   Res_17_6 : BOOL ;	//#17.6
+   Res_17_7 : BOOL ;	//#17.7
+   Res_18 : BYTE ;	//#18
+   CtrlVoltHi : BOOL ;	//#19.0: WARNING: Control voltage supply high
+   Ready2 : BOOL ;	//#19.1: Ready for motor on (redundant?)
+   CntBlShort : BOOL ;	//#19.2: ALARM: Contact block short circuit
+   BypassFlt : BOOL ;	//#19.3: ALARM: Bypass part fault
+   Res_19_4 : BOOL ;	//#19.4
+   Thyr1Flt : BOOL ;	//#19.5: ALARM: Switching element 1 failed
+   Thyr2Flt : BOOL ;	//#19.6: ALARM: Switching element 2 failed
+   Thyr3Flt : BOOL ;	//#19.7: ALARM: Switching element 3 failed
+   ThermModelOff : BOOL ;	//#20.0: Thermal motor model disabled
+   Res_20_1 : BOOL ;	//#20.1
+   Res_20_2 : BOOL ;	//#20.2
+   PhaseCtrlFlt : BOOL ;	//#20.3: ALARM: Phase angle control failure
+   Res_20_4 : BOOL ;	//#20.4
+   Res_20_5 : BOOL ;	//#20.5
+   Res_20_6 : BOOL ;	//#20.6
+   Res_20_7 : BOOL ;	//#20.7
+   CntBlCoolOn : BOOL ;	//#21.0: Contact block cooldown time active
+   CntBlHot : BOOL ;	//#21.1: ALARM: Contact block too hot for starting
+   AmpRangeOverflow : BOOL ;	//#21.2: Current range overflow
+   Res_21_3 : BOOL ;	//#21.3
+   Res_21_4 : BOOL ;	//#21.4
+   Res_21_5 : BOOL ;	//#21.5
+   Res_21_6 : BOOL ;	//#21.6
+   Res_21_7 : BOOL ;	//#21.7
+   PLC_AutMode2 : BOOL ;	//#22.0: Auto control via PLC (same 7.2)
+   PLC_ManMode2 : BOOL ;	//#22.1: Manual O&M control via Profibus (same 7.3)
+   ManBus_PC : BOOL ;	//#22.2: Manual bus PC controlled
+   Local_ManMode2 : BOOL ;	//#22.3: Manual local control via O&M (same 7.4)
+   ManLocInput : BOOL ;	//#22.4: Manual local control via inputs
+   ManLoc_OM : BOOL ;	//#22.5: Manual local control via O&M
+   ManLoc_PC : BOOL ;	//#22.6: Manual local control via PC
+   Res_22_7 : BOOL ;	//#22.7
+   Res_23 : BYTE ;	//#23
+   Res_24_0 : BOOL ;	//#24.0
+   Res_24_1 : BOOL ;	//#24.1
+   TimeUnderWarn : BOOL ;	//#24.2: WARNING: Prewarning limit time undershoot
+   HeatBldWarn : BOOL ;	//#24.3: WARNING: Prewarning motor heat buildup
+   Res_24_4 : BOOL ;	//#24.4
+   Res_24_5 : BOOL ;	//#24.5
+   Res_24_6 : BOOL ;	//#24.6
+   Res_24_7 : BOOL ;	//#24.7
+   Res_25 : BYTE ;	//#25
+   Res_26 : BYTE ;	//#26
+   Res_27 : BYTE ;	//#27
+   Res_28 : BYTE ;	//#28
+   Res_29 : BYTE ;	//#29
+  END_STRUCT ;	
+END_TYPE
+
+TYPE "Sirius_DataSet94"
+AUTHOR : STP
+VERSION : 1.0
+
+
+  STRUCT 	
+   L1_Amps : BYTE ;	//#0: 8-bit current format 0..255 [3.12%]
+   L2_Amps : BYTE ;	//#1: 8-bit current format 0..255 [3.12%]
+   L3_Amps : BYTE ;	//#2: 8-bit current format 0..255 [3.12%]
+   Reserved_3 : BYTE ;	//#3
+   CoolDownLeft : INT ;	//#4-5: Remaining cooldown time left 0..18000 [0.1s]
+   MtrHeatBuild_0 : BOOL ;	//#6.0: bits 0-6: motor heat build-up 0..100 [2%]
+   MtrHeatBuild_1 : BOOL ;	//#6.1: bits 0-6: motor heat build-up 0..100 [2%]
+   MtrHeatBuild_2 : BOOL ;	//#6.2: bits 0-6: motor heat build-up 0..100 [2%]
+   MtrHeatBuild_3 : BOOL ;	//#6.3: bits 0-6: motor heat build-up 0..100 [2%]
+   MtrHeatBuild_4 : BOOL ;	//#6.4: bits 0-6: motor heat build-up 0..100 [2%]
+   MtrHeatBuild_5 : BOOL ;	//#6.5: bits 0-6: motor heat build-up 0..100 [2%]
+   MtrHeatBuild_6 : BOOL ;	//#6.6: bits 0-6: motor heat build-up 0..100 [2%]
+   AsymmetryFlt : BOOL ;	//#6.7: 1=Asymmetry detected
+   Asymmetry : BYTE ;	//#7: 0..100 [1%]
+   Reserved_8 : BYTE ;	//#8
+   Reserved_9 : BYTE ;	//#9
+   Reserved_10 : BYTE ;	//#10
+   Reserved_11 : BYTE ;	//#11
+   Reserved_12 : BYTE ;	//#12
+   Reserved_13 : BYTE ;	//#13
+   Reserved_14 : BYTE ;	//#14
+   Reserved_15 : BYTE ;	//#15
+   FreqOut : BYTE ;	//#16: output frequency 0..200 [0.5Hz]
+   Reserved_17 : BYTE ;	//#17
+   Reserved_18 : BYTE ;	//#18
+   Reserved_19 : BYTE ;	//#19
+   FreqIn : BYTE ;	//#20: Line input frequency 0..200 [0.5Hz]
+   Reserved_21 : BYTE ;	//#21
+   U_L1L2 : INT ;	//#22-23: Phase to phase voltage L1-L2 0..15000 [0.1V]
+   U_L2L3 : INT ;	//#24-25: Phase to phase voltage L2-L3 0..15000 [0.1V]
+   U_L1L3 : INT ;	//#26-27: Phase to phase voltage L1-L3 0..15000 [0.1V]
+   I_L1 : DINT ;	//#28-31: Phase current L1 0..2e6 [0.01A]
+   I_L2 : DINT ;	//#32-35: Phase current L2 0..2e6 [0.01A]
+   I_L3 : DINT ;	//#36-39: Phase current L3 0..2e6 [0.01A]
+   U_ctrl : INT ;	//#40-41: Control voltage 0..15000 [0.1V]
+   T_heatsink : BYTE ;	//#42: Heatsink temperature -40..127 [1C]
+   T_cblock : BYTE ;	//#43: Contact block temperature 0..250 [1C]
+   CoolTimeLeft : INT ;	//#44-45: Remaining contact block cooldown time 0..18000 [0.1s]
+   ThermTimeLeft : INT ;	//#46-47: Remaining thermal trip time left 0..10000 [1s]
+   P_out : DINT ;	//#48-51: Output power [0.1W]
+   Reserved_52 : BYTE ;	//#52
+   Reserved_53 : BYTE ;	//#53
+   Reserved_54 : BYTE ;	//#54
+   Reserved_55 : BYTE ;	//#55
+   Reserved_56 : BYTE ;	//#56
+   Reserved_57 : BYTE ;	//#57
+   Reserved_58 : BYTE ;	//#58
+   Reserved_59 : BYTE ;	//#59
+   Reserved_60 : BYTE ;	//#60
+   Reserved_61 : BYTE ;	//#61
+   Reserved_62 : BYTE ;	//#62
+   Reserved_63 : BYTE ;	//#63
+  END_STRUCT ;	
+END_TYPE
+
+TYPE "Sirius_DataSet95"
+AUTHOR : STP
+VERSION : 1.0
+
+
+  STRUCT 	
+   I_max : BYTE ;	//#0: Maximum motor current [3.125%] 8-bit format
+   Res_1 : BYTE ;	//#1
+   I_A_last : BYTE ;	//#2: Last trigger current [3.125%] 8-bit format
+   DevHrs : DINT ;	//#3-7: Device operating time [1s]
+   StartCntCW : DINT ;	//#8-11: Number of forward starts
+   StartCntCCW : DINT ;	//#12-15: NUmber of reverse starts
+   TripCnt : INT ;	//#16-17: Overload trip counts
+   Res_18 : BYTE ;	//#18
+   Res_19 : BYTE ;	//#19
+   I_max_eff : DINT ;	//#20-23: Max eff motor current [0.01A]
+   I_A_last_eff : DINT ;	//#24-27: Last eff trigger current [0.01A]
+   MotorHrs : DINT ;	//#28-31: Motor operating time [1s]
+   I_e_max_1 : DINT ;	//#32-35: Operating hours for motor current >18% <50%
+   I_e_max_2 : DINT ;	//#36-39: Operating hours for motor current >50% <90%
+   I_e_max_3 : DINT ;	//#40-43: Operating hours for motor >90% <120%
+   I_e_max_4 : DINT ;	//#44-47: Operating hours for motor >120%
+   Res_48 : INT ;	//#48-49
+   CntBlkOvrlCnt : INT ;	//#50-51: Contact block overload count
+   Res_52 : INT ;	//#52-53
+   Res_54 : INT ;	//#54-55
+   Res_56 : DINT ;	//#56-59
+   BrkStopCnt : DINT ;	//#60-63: Number of braking stops
+   StrtCnt_Out1 : DINT ;	//#64-67: Number of starts - output 1
+   StrtCnt_Out2 : DINT ;	//#68-71: Number of starts - output 2
+   StrtCnt_Out3 : DINT ;	//#72-75: Number of starts - output 3
+   StrtCnt_Out4 : DINT ;	//#76-79: Number of starts - output 4
+   Res_80 : DINT ;	//#80-83
+   Res_84 : DINT ;	//#84-87
+   Res_88 : BYTE ;	//#88
+   Res_89 : BYTE ;	//#89
+  END_STRUCT ;	
+END_TYPE
+
