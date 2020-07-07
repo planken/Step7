@@ -1,0 +1,16 @@
+
+FUNCTION Str_Clear : void
+
+VAR_IN_OUT
+    Str : STRING;
+END_VAR
+
+VAR_TEMP
+    // Temporary Variables
+
+END_VAR
+
+    Str := '';
+
+END_FUNCTION
+
