@@ -1,0 +1,170 @@
+FUNCTION_BLOCK "ONOFF_CYCL 3.6"
+TITLE =On/off control with max duration or nbr of cycles
+//Energize an output with confugrable duty cycle. Optonally, specify a maximum 
+//duration and/or maximum number of cycles. (If both specified, cycle runs while 
+//both conditions true).
+AUTHOR : splanken
+VERSION : 3.6
+
+
+VAR_INPUT
+  Start : BOOL ;	//Input that triggers the output
+  Max_time : TIME ;	//Total runtime or T#0ms for no limit
+  Max_cycles : INT ;	
+  On_time : TIME ;	//Desired ON time
+  Off_time : TIME ;	//Desired OFF time
+END_VAR
+VAR_OUTPUT
+  Output : BOOL ;	//Output
+  Running : BOOL ;	//Cycle in progress
+  Done : BOOL ;	//Cycle done
+END_VAR
+VAR
+  T_run : "TON";	//IEC on timer for run time
+  T_on : "TP";	//IEC timer for on time
+  T_off : "TP";	//IEC timer for off time
+  Cycle_count : INT ;	
+  Start_pls : BOOL ;	
+  Start_OS : BOOL ;	
+  Cycle_pls : BOOL ;	
+  Run_OK : BOOL ;	//Combined run permissive
+  Run_done_int : BOOL ;	//Internal "done" boolean
+END_VAR
+VAR_TEMP
+  Time_OK : BOOL ;	
+  Count_OK : BOOL ;	
+  Old_run_ok : BOOL ;	
+  Old_running : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+//v3.6 24Oct16: Added "done" status.
+//v3.5 17Apr16: Bug fix. Used INT for comparisons ON/OFf time inputs.
+//v3.4 12Apr16: Bug fix. Clear cycle counter on start. Increment cycle counter on 
+//negative edge of off cycle.
+//v3.3 24Mar16: Bug fix. Whem max_cycles was 0 time 
+//had to be >0. Fixed.
+//v3.1 03Dec15: Bug fix. Added test for either valid run time or count in 
+//     output coil network. *** v3.0 IS DEPRECATED ***
+//v3.0 26Nov15: Added a cycle counter in addition to max run time.
+//v2.2 26Nov15: Changed on timers to pulse timers so the run time cycle starts 
+//     with an on condition.
+//v2.1 14May15: Rewritten with IEC timers using the instance datablock.
+
+
+NETWORK
+TITLE =Reset cycle counter on start
+
+      A     #Start; 
+      FP    #Start_pls; 
+      JNB   _001; 
+      L     0; 
+      T     #Cycle_count; 
+_001: NOP   0; 
+NETWORK
+TITLE =Limit total run time
+
+      A     #Start; 
+      A(    ; 
+      L     #Max_time; 
+      L     T#0MS; 
+      >D    ; 
+      )     ; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_run (
+           IN                       := L      1.0,
+           PT                       := #Max_time);
+
+      NOP   0; 
+NETWORK
+TITLE =Run conditions
+//* Input active
+//* On time and off time specified > 0
+//* Max run time not expired
+//* Max cycles not exceeded
+      A     #Start; 
+      A(    ; 
+      L     #On_time; 
+      L     T#0MS; 
+      >D    ; 
+      )     ; 
+      A(    ; 
+      L     #Off_time; 
+      L     T#0MS; 
+      >D    ; 
+      )     ; 
+      AN    #T_run.Q; 
+      A(    ; 
+      O(    ; 
+      L     #Cycle_count; 
+      L     #Max_cycles; 
+      <I    ; 
+      )     ; 
+      O(    ; 
+      L     #Max_cycles; 
+      L     0; 
+      ==I   ; 
+      )     ; 
+      )     ; 
+      =     #Run_OK; 
+      =     #Running; 
+NETWORK
+TITLE =Accumulate on time
+//Accumulate the output on time.
+      A     #Run_OK; 
+      AN    #T_off.Q; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_on (
+           IN                       := L      1.0,
+           PT                       := #On_time,
+           Q                        := #Output);
+
+      NOP   0; 
+NETWORK
+TITLE =
+
+      A     #Start; 
+      A(    ; 
+      ON    #Run_OK; 
+      O     #Run_done_int; 
+      )     ; 
+      =     #Done; 
+      =     #Run_done_int; 
+NETWORK
+TITLE =Accumulate off time
+//Accumulate the output off time.
+      A     #Run_OK; 
+      AN    #T_on.Q; 
+      =     L      1.0; 
+      BLD   103; 
+      CALL #T_off (
+           IN                       := L      1.0,
+           PT                       := #Off_time);
+
+      NOP   0; 
+NETWORK
+TITLE =Increment cycle counter on OFF cycle
+
+      A     #T_off.Q; 
+      A(    ; 
+      L     #Max_cycles; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      FN    #Cycle_pls; 
+      JNB   _002; 
+      L     #Cycle_count; 
+      L     1; 
+      +I    ; 
+      T     #Cycle_count; 
+_002: NOP   0; 
+NETWORK
+TITLE =Force ENO
+//Force ENO status.
+      SET   ; 
+      SAVE  ; 
+END_FUNCTION_BLOCK
+
