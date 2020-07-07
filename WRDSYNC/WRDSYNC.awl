@@ -1,0 +1,286 @@
+FUNCTION "WRDSYNC2.0P" : VOID
+TITLE =Word sync
+KNOW_HOW_PROTECT
+//Synchronize two words of data type INT/DINT/REAL.
+AUTHOR : splanken
+VERSION : 2.0
+
+
+VAR_IN_OUT
+  Value1 : ANY ;	
+  Value2 : ANY ;	
+  Val1_prev : ANY ;	
+  Val2_prev : ANY ;	
+END_VAR
+VAR_TEMP
+  IsInt : BOOL ;	
+  DB_val1 : INT ;	
+  DB_val2 : INT ;	
+  DB_val1prev : INT ;	
+  DB_val2prev : INT ;	
+  t_int : INT ;	
+  t_dword : DWORD ;	
+  t_AR2 : DWORD ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Save AR2
+
+      TAR2  #t_AR2; 
+
+NETWORK
+TITLE =Type check of input values
+
+      L     P##Value1; // Read type value 1
+      LAR1  ; 
+
+      L     W [AR1,P#4.0]; // Store value 1 DB#
+      T     #DB_val1; 
+
+      L     B [AR1,P#1.0]; 
+      L     5; 
+      ==I   ; 
+      =     #IsInt; 
+
+
+      L     P##Value2; // Read type value 2
+      LAR2  ; 
+
+      L     W [AR2,P#4.0]; // Store value 2 DB#
+      T     #DB_val2; 
+
+      L     B [AR1,P#1.0]; 
+      L     B [AR2,P#1.0]; 
+      ==I   ; 
+      JCN   x; 
+
+
+      L     P##Val1_prev; // Read type previous value 1
+      LAR2  ; 
+
+      L     W [AR2,P#4.0]; // Store prev value 1 DB#
+      T     #DB_val1prev; 
+
+      L     B [AR1,P#1.0]; 
+      L     B [AR2,P#1.0]; 
+      ==I   ; 
+      JCN   x; 
+
+
+      L     P##Val2_prev; // Read type previous value 2
+      LAR2  ; 
+
+      L     W [AR2,P#4.0]; // Store prev value 2 DB#
+      T     #DB_val2prev; 
+
+      L     B [AR1,P#1.0]; 
+      L     B [AR2,P#1.0]; 
+      ==I   ; 
+      JCN   x; 
+
+
+NETWORK
+TITLE =For integers, skip to that portion
+
+      A     #IsInt; 
+      JC    i1; 
+
+NETWORK
+TITLE =dint/real value 1->value2
+
+// === If value 1 changed, copy its value to the others ===
+
+      L     P##Value1; 
+      LAR1  ; 
+      OPN   DB [#DB_val1]; // -- Read value1 
+      L     D [AR1,P#6.0]; 
+      LAR1  ; 
+
+      L     D [AR1,P#0.0]; 
+      T     #t_dword; 
+
+      L     P##Val1_prev; // -- Prepare val1_prev
+      LAR2  ; 
+      OPN   DB [#DB_val1prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     D [AR2,P#0.0]; // Changed?
+      L     #t_dword; 
+      ==D   ; 
+      JC    d2; 
+
+      L     #t_dword; // Copy value1 -> val1_prev
+      T     D [AR2,P#0.0]; 
+
+      L     P##Value2; // -- Prepare value2
+      LAR2  ; 
+      OPN   DB [#DB_val2]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_dword; // Copy value1 -> value2
+      T     D [AR2,P#0.0]; 
+
+      L     P##Val2_prev; // -- Prepare val2_prev
+      LAR2  ; 
+      OPN   DB [#DB_val2prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_dword; // Copy value1 -> val2_prev
+      T     D [AR2,P#0.0]; 
+
+NETWORK
+TITLE =dint/real value 2
+
+// === If value 2 changed, copy its value to the others ===
+
+d2:   L     P##Value2; 
+      LAR1  ; 
+      OPN   DB [#DB_val2]; // -- Read value2  (AR1 still points to value1)
+      L     D [AR1,P#6.0]; 
+      LAR1  ; 
+
+      L     D [AR1,P#0.0]; 
+      T     #t_dword; 
+
+      L     P##Val2_prev; // -- Prepare val2_prev
+      LAR2  ; 
+      OPN   DB [#DB_val2prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     D [AR2,P#0.0]; // Changed?
+      L     #t_dword; 
+      ==D   ; 
+      JC    x; 
+
+      L     #t_dword; // Copy value2 -> val2_prev
+      T     D [AR2,P#0.0]; 
+
+      L     P##Value1; // -- Prepare value1
+      LAR2  ; 
+      OPN   DB [#DB_val1]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_dword; // Copy value2 -> value1
+      T     D [AR2,P#0.0]; 
+
+      L     P##Val1_prev; // -- Prepare val1_prev
+      LAR2  ; 
+      OPN   DB [#DB_val1prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_dword; // Copy value2 -> val1_prev
+      T     D [AR2,P#0.0]; 
+
+NETWORK
+TITLE =
+
+      JU    x; 
+
+NETWORK
+TITLE =int value 1
+
+// === If value 1 changed, copy its value to the others ===
+
+i1:   L     P##Value1; 
+      LAR1  ; 
+      OPN   DB [#DB_val1]; // -- Read value1  (AR1 still points to value1)
+      L     D [AR1,P#6.0]; 
+      LAR1  ; 
+
+      L     W [AR1,P#0.0]; 
+      T     #t_int; 
+
+      L     P##Val1_prev; // -- Prepare val1_prev
+      LAR2  ; 
+      OPN   DB [#DB_val1prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     W [AR2,P#0.0]; // Changed?
+      L     #t_int; 
+      ==I   ; 
+      JC    i2; 
+
+      L     #t_int; // Copy value1 -> val1_prev
+      T     W [AR2,P#0.0]; 
+
+      L     P##Value2; // -- Prepare value2
+      LAR2  ; 
+      OPN   DB [#DB_val2]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_int; // Copy value1 -> value2
+      T     W [AR2,P#0.0]; 
+
+      L     P##Val2_prev; // -- Prepare val2_prev
+      LAR2  ; 
+      OPN   DB [#DB_val2prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_int; // Copy value1 -> val2_prev
+      T     W [AR2,P#0.0]; 
+
+NETWORK
+TITLE =int value 2
+
+// === If value 2 changed, copy its value to the others ===
+
+i2:   L     P##Value2; 
+      LAR1  ; 
+      OPN   DB [#DB_val2]; // -- Read value2  (AR1 still points to value1)
+      L     D [AR1,P#6.0]; 
+      LAR1  ; 
+
+      L     W [AR1,P#0.0]; 
+      T     #t_int; 
+
+      L     P##Val2_prev; // -- Prepare val2_prev
+      LAR2  ; 
+      OPN   DB [#DB_val2prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     W [AR2,P#0.0]; // Changed?
+      L     #t_int; 
+      ==I   ; 
+      JC    x; 
+
+      L     #t_int; // Copy value2 -> val2_prev
+      T     W [AR2,P#0.0]; 
+
+      L     P##Value1; // -- Prepare value1
+      LAR2  ; 
+      OPN   DB [#DB_val1]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_int; // Copy value2 -> value1
+      T     W [AR2,P#0.0]; 
+
+      L     P##Val1_prev; // -- Prepare val1_prev
+      LAR2  ; 
+      OPN   DB [#DB_val1prev]; 
+      L     D [AR2,P#6.0]; 
+      LAR2  ; 
+
+      L     #t_int; // Copy value2 -> val1_prev
+      T     W [AR2,P#0.0]; 
+
+NETWORK
+TITLE =
+
+x:    LAR2  #t_AR2; // Restore AR2
+
+      SET   ; // Force ENO
+      SAVE  ; 
+
+END_FUNCTION
+
