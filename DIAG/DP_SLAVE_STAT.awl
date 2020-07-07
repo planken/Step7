@@ -1,0 +1,79 @@
+FUNCTION_BLOCK "DP_SLAV_STAT_1.0P"
+TITLE =DP_SLAV_STAT
+KNOW_HOW_PROTECT
+//Obtain the fault status of slaves connected to a DP master system. (Must be 
+//connected to CPU built-in DP port.)
+AUTHOR : STP
+VERSION : 1.0
+
+
+VAR_INPUT
+  DB_NBR : BLOCK_DB ;	//Storage for slave status (16 bytes, starting at DBX0.0)
+  DP_ID : WORD ;	//DP master system ID (typically 1)
+  CLK_1HZ : BOOL ;	//Read clock
+END_VAR
+VAR
+  Read : BOOL ;	//SFC51 read request
+  Busy : BOOL ;	//SFC51 busy status
+  Rd_status : INT ;	//SFC51 result value
+  SSL_HDR : STRUCT 	//SSL header (not used here but required)
+   LEN_DR : WORD ;	//Record length
+   DR_N : WORD ;	//Number of records received
+  END_STRUCT ;	
+  DR_DB_nbr : INT ;	//DB number as integer
+END_VAR
+VAR_TEMP
+  DR_ptr : ANY ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =
+
+// Read the supplied data block number and prepare for the DR pointer
+
+      LAR1  P##DB_NBR; 
+      L     DIW [AR1,P#0.0]; 
+      T     #DR_DB_nbr; 
+
+// Now we build the DR pointer
+// SFC51 would normally accept the DR as: P#DB1.DBX0.0 BYTE 16
+// to store the data in DB1.DBB0 through DBB15 (starting at bit DBX0.0)
+
+      LAR1  P##DR_ptr; 
+
+      L     B#16#10; // Byte 0 = Syntax ID
+      T     LB [AR1,P#0.0]; 
+
+      L     B#16#2; // Byte 1 = Storage type byte = 2
+      T     LB [AR1,P#1.0]; 
+
+      L     16; // Byte 2-3 = length in bytes
+      T     LW [AR1,P#2.0]; 
+
+      L     #DR_DB_nbr; // Byte 4-5 = DB number
+      T     LW [AR1,P#4.0]; 
+
+      L     P#DBX 0.0; // Byte 6-9 = Area pointer (start in DB)
+      T     LD [AR1,P#6.0]; 
+
+// Cyclically request the data, except when we're still busy
+
+      A     #CLK_1HZ; 
+      S     #Read; 
+
+      A     #Busy; 
+      R     #Read; 
+
+// Fetch DP slave status
+
+      CALL "RDSYSST" (
+           REQ                      := #Read,
+           SZL_ID                   := W#16#692,
+           INDEX                    := #DP_ID,
+           RET_VAL                  := #Rd_status,
+           BUSY                     := #Busy,
+           SZL_HEADER               := #SSL_HDR,
+           DR                       := #DR_ptr);
+
+END_FUNCTION_BLOCK
+
