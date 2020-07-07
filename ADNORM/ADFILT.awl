@@ -1,0 +1,97 @@
+FUNCTION FC 209 : VOID
+TITLE =AD FILTER
+KNOW_HOW_PROTECT
+//SIMONE STEFANI/24Jul99
+//This function provide to smooth a analog input.
+//The function calculate the smooth value by add S/16 of previous value with
+//(16-S)/16 of actual value
+//
+//the formula used is:
+//Out = ([Prev_value] * S%) + ([Input_value] * (1-S%))
+//S = smoothing factor 0-99
+//
+//If you want to.....               then enter.....
+//Prevent the smoothing process     0
+//Provide minimal smoothing         1
+//provide maximum smoothing         99
+//
+// v1.2: Clip smoothing factor to max. Force ENO.
+// v1.3: Never reeased
+// v1.4: Enter factor as percentage.
+AUTHOR : STEFANI
+VERSION : 1.3
+
+
+VAR_INPUT
+  PV : REAL ;	// Process value to filter
+  S : INT ;	// Filter factor 0 (no filter)..99 (max filter)
+  Clk : BOOL ;	//One-shot clock pulse
+END_VAR
+VAR_OUTPUT
+  Out : REAL ;	// Filtered output value
+END_VAR
+VAR_IN_OUT
+  Out_prev : REAL ;	// Previous output value
+END_VAR
+VAR_TEMP
+  S_aux : REAL ;	
+  Real_1 : REAL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Segmento: 1 Timing
+//This network manage the timing of function
+//06Jan06 (STP) Modified from original. We offer this FC a one-shot 
+//clock pulse. On any other PLC scan we do not perform any 
+//calculations but exit immediately.
+      AN    #Clk; 
+      JC    _x; 
+NETWORK
+TITLE =Formula
+//This network apply the smoothing formula
+// Convert 0-100 to 0-1
+      L     #S; 
+      ITD   ; 
+      DTR   ; 
+      L     1.000000e+002; 
+      /R    ; 
+      T     #S_aux; 
+
+// Limit smoothing factor between 0.0 and 1.0
+      L     9.900000e-001; 
+      >=R   ; 
+      JCN   _a; 
+      L     9.900000e-001; 
+      T     #S_aux; 
+
+_a:   L     #S_aux; 
+      L     0.000000e+000; 
+      <R    ; 
+      JCN   _b; 
+      L     0.000000e+000; 
+      T     #S_aux; 
+
+// Execute smoothing
+_b:   L     #S_aux; 
+      L     #Out_prev; 
+      *R    ; 
+      T     #Real_1; // S% * out_prev
+
+      L     1.000000e+000; 
+      L     #S_aux; 
+      -R    ; 
+      L     #PV; 
+      *R    ; // 100%-S% * PV
+
+      L     #Real_1; 
+      +R    ; // Sum of both
+
+      T     #Out; 
+      T     #Out_prev; // Save previous value
+
+// Force ENO
+_x:   SET   ; 
+      SAVE  ; 
+
+END_FUNCTION
+
