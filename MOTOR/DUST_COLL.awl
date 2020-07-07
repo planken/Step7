@@ -1,0 +1,160 @@
+FUNCTION_BLOCK "Dust coll v2.0P"
+TITLE =Dust Collector with Rapper
+KNOW_HOW_PROTECT
+//v1.21 - Minor change, made interface tags names identical for drop-in 
+//replacement of this FC.
+//v1.2 - Improved code, eliminating motor FC, incorporating start logic.
+//v0.1 - Original UAS code by Doug.
+AUTHOR : STP
+FAMILY : MOTOR
+NAME : DUSTCOLL
+VERSION : 2.0
+
+
+VAR_INPUT
+  Start_auto : BOOL ;	//Auto start permissive dust collector motor
+  Start_main_man : BOOL ;	//Dust collector contactor coil energize
+  Start_rapping_man : BOOL ;	//Manual start request rapper motor
+  Manual_mode : BOOL ;	//Manual mode = 1
+  EStop_alarm : BOOL ;	//Emergency stop alarm
+  Alarm_reset : BOOL ;	//Alarm reset
+  EQ_MS_main : BOOL ;	//Dust collector contactor feedback
+  EQ_MS_rapping : BOOL ;	//Rapper motor contactor feedback
+  Rapping_time : TIME ;	//Rapping time
+END_VAR
+VAR_OUTPUT
+  Main_running : BOOL ;	//Dust collector motor running
+  Rapping_running : BOOL ;	//Rapper motor running
+END_VAR
+VAR_IN_OUT
+  EQ_M_main : BOOL ;	
+  EQ_M_rapping : BOOL ;	
+  Alarm_M_main : BOOL ;	
+  Alarm_M_rapping : BOOL ;	
+END_VAR
+VAR
+  T_rapping : "TON";	
+  T_M_main : "TON";	
+  T_M_rapping : "TON";	
+  Rapping_time_sel : TIME ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Enforce valid time
+//If no time was specified, we use a fixed time of 5 seconds. Please note that a 
+//shorter time may be specified, this is just a replacement value in case the 
+//value is 0, since it affects the IEC timer.
+      A(    ; 
+      L     #Rapping_time; 
+      T     #Rapping_time_sel; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Rapping_time; 
+      L     T#0MS; 
+      ==D   ; 
+      )     ; 
+      JNB   _001; 
+      L     T#5S; 
+      T     #Rapping_time_sel; 
+_001: NOP   0; 
+NETWORK
+TITLE =Rapper timer
+
+      AN    #Start_auto; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #T_rapping (
+           IN                       := L      0.0,
+           PT                       := #Rapping_time_sel);
+
+      NOP   0; 
+NETWORK
+TITLE =Main motor - monitor contactor response time
+
+      A(    ; 
+      A     #EQ_M_main; 
+      AN    #EQ_MS_main; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #T_M_main (
+           IN                       := L      0.0,
+           PT                       := T#150MS);
+
+      A     BR; 
+      )     ; 
+      A     #T_M_main.Q; 
+      S     #Alarm_M_main; 
+NETWORK
+TITLE =Main motor - start permissive
+
+      AN    #EStop_alarm; 
+      AN    #Alarm_M_main; 
+      A(    ; 
+      AN    #Manual_mode; 
+      A     #Start_auto; 
+      O     ; 
+      A     #Manual_mode; 
+      A     #Start_main_man; 
+      )     ; 
+      =     #EQ_M_main; 
+NETWORK
+TITLE =Main motor - indicate running
+
+      A     #EQ_M_main; 
+      A     #EQ_MS_main; 
+      =     #Main_running; 
+NETWORK
+TITLE =Rapping motor - monitor contactor response time
+
+      A(    ; 
+      A     #EQ_M_rapping; 
+      AN    #EQ_MS_rapping; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #T_M_rapping (
+           IN                       := L      0.0,
+           PT                       := T#150MS);
+
+      A     BR; 
+      )     ; 
+      A     #T_M_rapping.Q; 
+      S     #Alarm_M_rapping; 
+NETWORK
+TITLE =Rapping motor - start permissive
+//Remains ON for 100 x 0.1 sec = 10 seconds after main motor stops.
+      AN    #EStop_alarm; 
+      AN    #Alarm_M_rapping; 
+      A(    ; 
+      AN    #Manual_mode; 
+      AN    #Start_auto; 
+      AN    #Main_running; 
+      AN    #T_rapping.Q; 
+      O     ; 
+      A     #Manual_mode; 
+      A     #Start_rapping_man; 
+      )     ; 
+      =     #EQ_M_rapping; 
+NETWORK
+TITLE =Rapping motor - indicate running
+
+      A     #EQ_M_rapping; 
+      A     #EQ_MS_rapping; 
+      =     #Rapping_running; 
+NETWORK
+TITLE =Clear alarms
+
+      A     #Alarm_reset; 
+      R     #Alarm_M_main; 
+      R     #Alarm_M_rapping; 
+NETWORK
+TITLE =Return output
+
+      O     #Main_running; 
+      O     #Rapping_running; 
+      SAVE  ; 
+END_FUNCTION_BLOCK
+
