@@ -1,0 +1,496 @@
+FUNCTION_BLOCK "CPU LED v1.3P"
+TITLE =CPU LED
+//Read system data to obtain which LEDs are active.
+//Only the system and bus faults are brought to the interface outputs. Several 
+//other LEDs are stored in the instance data block and can be evaulated by the 
+//calling routine by accessing it directly.
+KNOW_HOW_PROTECT
+AUTHOR : STP
+VERSION : 1.3
+
+
+VAR_INPUT
+  Clk_1Hz : BOOL ;	//1Hz clock one-shot
+END_VAR
+VAR_OUTPUT
+  LED_SF : BOOL ;	//System fault
+  LED_BUSxF : BOOL ;	//Any bus interface 1..3 fault
+END_VAR
+VAR
+  SSL_HDR : STRUCT 	
+   LEN_DR : WORD ;	//Record length
+   DR_N : WORD ;	//Number of records received
+  END_STRUCT ;	
+  DR : ARRAY  [1 .. 10 ] OF STRUCT 	
+   Not_used : BYTE ;	
+   LED_ID : BYTE ;	//LED identifier (CPU dependent)
+   On : BYTE ;	//0=off; 1=on
+   Flash : BYTE ;	//0=no flash; 1=fast; 2=slow
+  END_STRUCT ;	
+  Status : STRUCT 	
+   Value : INT ;	//SFC51 status value
+   Busy : BOOL ;	//1=Busy processing SFC
+   Read_OK : BOOL ;	//1=Data read OK
+   Read_fault : BOOL ;	//1=Data read faulty, last LED values retained
+   Read_rq : BOOL ;	//Read request
+  END_STRUCT ;	
+  SSL_copy : STRUCT 	
+   Length : INT ;	
+   Nbr : INT ;	
+  END_STRUCT ;	
+  LoopCount : INT ;	//Loop counter
+  LED : STRUCT 	
+   SF : STRUCT 	//ID = 0x02
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+   Bus1F : STRUCT 	//ID = 0x0B
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+   Bus2F : STRUCT 	//ID = 0x0C
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+   Bus3F : STRUCT 	//ID = 0x14
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+   FRCE : STRUCT 	//ID = 0x06
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+   INTF : STRUCT 	//ID = 0x02
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+   EXTF : STRUCT 	//ID = 0x03
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+   BAT : STRUCT 	//ID = 0x08
+    On : BOOL ;	//0=Off; 1=On
+    Flash_fast : BOOL ;	//0=No fast flash; 1=fast flash
+    Flash_slow : BOOL ;	//0=No slow flash; 1=slow flash
+   END_STRUCT ;	
+  END_STRUCT ;	
+END_VAR
+VAR_TEMP
+  Tmp_ID : INT ;	
+  Tmp_On : BOOL ;	
+  Tmp_Flash_fast : BOOL ;	
+  Tmp_Flash_slow : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Cyclically, request READ
+
+      A     #Clk_1Hz; 
+      S     #Status.Read_rq; 
+NETWORK
+TITLE =Avoid new read request when still busy.
+
+      A     #Status.Busy; 
+      R     #Status.Read_rq; 
+NETWORK
+TITLE =Execute SFC51
+//We are using SSL_ID 0x19 (SSl ID = 0) to obtain all the LEDs at once. The 
+//header will 
+//contain the record length and the number of records returned. This is heavily 
+//CPU-dependent.
+//
+//(*
+//On byte: 0 = off, 1 = on
+//
+//Flash byte: 0 = no flash, 1 = 2Hz, 2 = 0.5Hz
+//
+//LED IDs:
+//0x01 SF
+//0x02 INTF
+//0x03 EXTF
+//0x04 RUN
+//0x05 STOP
+//0x06 FRCE
+//0x07 CRST
+//0x08 BAT
+//0x09 USR
+//0x0A USR1
+//0x0B BUS1F
+//0x0C BUS2F
+//0x0D REDF
+//0x0E MSTR
+//0x0F RACK0
+//0x10 RACK1
+//0x11 RACK2
+//0x12 IFM1F
+//0x13 IFM2F
+//0x14 BUS3F
+//0x15 MAINT
+//0x16 DC24V
+//0x17 BUS5F
+//0x80 IF (init failure)
+//0x81 UF (user failure)
+//0x82 MF (monitoring failure)
+//0x83 CF (communication failure)
+//0x84 TF (task failure)
+//0xEC APPL_STATE_RED
+//0xED APPL_STATE_GREEN
+//
+//Data records are 4 bytes long. Number of records depends on CPU.
+//*)
+//
+      A     #Status.Read_rq; 
+      =     L      3.0; 
+      BLD   103; 
+      CALL "RDSYSST" (
+           REQ                      := L      3.0,
+           SZL_ID                   := W#16#19,
+           INDEX                    := W#16#0,
+           RET_VAL                  := #Status.Value,
+           BUSY                     := #Status.Busy,
+           SZL_HEADER               := #SSL_HDR,
+           DR                       := #DR);
+      NOP   0; 
+NETWORK
+TITLE =Evaluate status value
+//Any value in the 0x8000 range is an error condition. We skip the LED evaluation 
+//so the last values will be retained.
+      L     #Status.Value; 
+      L     0; 
+      <I    ; 
+      =     #Status.Read_fault; 
+NETWORK
+TITLE =Determine read OK
+//Wait until SFC is done processing and returns 0.
+      AN    #Status.Busy; 
+      A(    ; 
+      L     #Status.Value; 
+      L     0; 
+      ==I   ; 
+      )     ; 
+      =     #Status.Read_OK; 
+NETWORK
+TITLE =Copy SSl header data to buffer
+//The SSL Header data will not be retained in between reads so we save this. With 
+//it we also perform an implicit type conversion from word to int so we don't 
+//have to deal with that in the SCL code.
+      A(    ; 
+      A     #Status.Read_OK; 
+      JNB   _001; 
+      L     #SSL_HDR.LEN_DR; 
+      T     #SSL_copy.Length; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_001: A     BR; 
+      )     ; 
+      JNB   _002; 
+      L     #SSL_HDR.DR_N; 
+      T     #SSL_copy.Nbr; 
+_002: NOP   0; 
+NETWORK
+TITLE =If the read status was invalid, skip the analysis
+
+      AN    #Status.Read_OK; 
+      JC    X; 
+NETWORK
+TITLE =Clear all LED states first
+
+      SET   ; 
+
+      R     #LED_SF; 
+      R     #LED_BUSxF; 
+
+      R     #LED.SF.On; 
+      R     #LED.SF.Flash_fast; 
+      R     #LED.SF.Flash_slow; 
+
+      R     #LED_BUSxF; 
+      R     #LED.Bus1F.On; 
+      R     #LED.Bus1F.Flash_fast; 
+      R     #LED.Bus1F.Flash_slow; 
+
+      R     #LED.Bus2F.On; 
+      R     #LED.Bus2F.Flash_fast; 
+      R     #LED.Bus2F.Flash_slow; 
+
+      R     #LED.Bus3F.On; 
+      R     #LED.Bus3F.Flash_fast; 
+      R     #LED.Bus3F.Flash_slow; 
+
+      R     #LED.FRCE.On; 
+      R     #LED.FRCE.Flash_fast; 
+      R     #LED.FRCE.Flash_slow; 
+
+      R     #LED.INTF.On; 
+      R     #LED.INTF.Flash_fast; 
+      R     #LED.INTF.Flash_slow; 
+
+      R     #LED.EXTF.On; 
+      R     #LED.EXTF.Flash_fast; 
+      R     #LED.EXTF.Flash_slow; 
+
+      R     #LED.BAT.On; 
+      R     #LED.BAT.Flash_fast; 
+      R     #LED.BAT.Flash_slow; 
+
+NETWORK
+TITLE =Read a data record
+
+
+      L     1; // Loop counter 1..10
+      T     #LoopCount; 
+
+      LAR1  P##DR; // Load address of DR in AR1
+
+A:    L     DIB [AR1,P#1.0]; // Store the current LED ID
+      T     #Tmp_ID; 
+
+      L     DIB [AR1,P#2.0]; // Store the current on state
+      L     B#16#1; 
+      ==I   ; 
+      =     #Tmp_On; 
+
+      L     DIB [AR1,P#3.0]; // Store the current fast flash state
+      L     B#16#1; 
+      ==I   ; 
+      =     #Tmp_Flash_fast; 
+
+      L     DIB [AR1,P#3.0]; // Store the current slow flash state
+      L     B#16#2; 
+      ==I   ; 
+      =     #Tmp_Flash_slow; 
+
+NETWORK
+TITLE =Check the SF LED
+//If the LED ID is 1, the record is for the SF LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     1; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED_SF; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.SF.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.SF.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.SF.Flash_slow; 
+NETWORK
+TITLE =Check the BUS1F LED 
+//If the LED ID is 11, the record is for the BUS1F LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     11; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED_BUSxF; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.Bus1F.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.Bus1F.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.Bus1F.Flash_slow; 
+NETWORK
+TITLE =Check the BUS2F LED
+//If the LED ID is 12, the record is for the BUS2F LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     12; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED_BUSxF; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.Bus2F.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.Bus2F.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.Bus2F.Flash_slow; 
+NETWORK
+TITLE =Check the BUS3F LED
+//If the LED ID is 20, the record is for the BUS3F LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     20; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED_BUSxF; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.Bus3F.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.Bus3F.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.Bus3F.Flash_slow; 
+NETWORK
+TITLE =Check the INTF LED
+//If the LED ID is 2, the record is for the INTF LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     2; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.INTF.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.INTF.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.INTF.Flash_slow; 
+NETWORK
+TITLE =Check the EXTF LED
+//If the LED ID is 3, the record is for the INTF LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     3; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.EXTF.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.EXTF.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.EXTF.Flash_slow; 
+NETWORK
+TITLE =Check the FRCE LED
+//If the LED ID is 8, the record is for the FRCE LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     6; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.FRCE.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.FRCE.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.FRCE.Flash_slow; 
+NETWORK
+TITLE =Check the BAT LED
+//If the LED ID is 8, the record is for the BAT LED.
+//Write the flash state to the stat area. If needed it can be retrieved from the 
+//instance datablock directly.
+      A(    ; 
+      L     #Tmp_ID; 
+      L     8; 
+      ==I   ; 
+      )     ; 
+      A     #Tmp_On; 
+      =     L      3.0; 
+      A     L      3.0; 
+      BLD   102; 
+      S     #LED.BAT.On; 
+      A     L      3.0; 
+      A     #Tmp_Flash_fast; 
+      S     #LED.BAT.Flash_fast; 
+      A     L      3.0; 
+      A     #Tmp_Flash_slow; 
+      S     #LED.BAT.Flash_slow; 
+NETWORK
+TITLE =Increment address register
+//Advance the address register by 4 bytes to obtain the next data record (even if 
+//we are at the end; we will check the current record number next).
+      +AR1  P#4.0; 
+
+NETWORK
+TITLE =Increment looop counter
+//We keep reading until the reported nbr of records have been processed (or the 
+//array limit has been reached).
+//If we have not yet reached the limit, increment the loop counter and jump back 
+//to retrieve the next data record.
+      A(    ; 
+      L     #LoopCount; 
+      L     #SSL_copy.Nbr; 
+      <I    ; 
+      )     ; 
+      A(    ; 
+      L     #LoopCount; 
+      L     11; 
+      <I    ; 
+      )     ; 
+      JNB   _003; 
+      L     #LoopCount; 
+      L     1; 
+      +I    ; 
+      T     #LoopCount; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_003: A     BR; 
+      JC    A; 
+NETWORK
+TITLE =Clear the request when done
+//(Not so useful)
+X:    O     #Status.Read_fault; 
+      O     #Status.Read_OK; 
+      R     #Status.Read_rq; 
+NETWORK
+TITLE =
+
+      AN    #Status.Read_fault; 
+      SAVE  ; 
+
+END_FUNCTION_BLOCK
+
