@@ -1,0 +1,515 @@
+FUNCTION_BLOCK "4B F500 READ"
+TITLE =4B hazard monitoring peripheral read
+//Layout of the nodes DB:
+//DBB     PIB     Array             Length     Type
+//------  ------  ----------------  ---------  --------
+//   0.0  1218.0  Sensors           [1..60]    INT
+// 320.0  1385.0  SensorAlarms      [1..128]   BOOL
+// 336.0  1405.0  NodeType          [1..160]   BOOL
+// 400.0       -  Temps             [1..160]   INT
+// 720.0       -  SensorStatus      [1..160]   BOOL*16
+//1040.0       -  NodeWarning       [1..32]    BOOL
+//1044.0       -  NodeFault         [1..32]    BOOL
+//1048.0       -  NodeTEwarning     [1..32]    BOOL
+//1052.0       -  NodeTEfault       [1..32]    BOOL
+//1056.0       -  NodeTrackWarning  [1..32]    BOOL
+//1060.0       -  NodeTrackFault    [1..32]    BOOL
+AUTHOR : splanken
+VERSION : 1.0
+
+
+VAR_INPUT
+  DPADDR : INT ;	//Peripheral start address of F500
+  DATA : BLOCK_DB ;	//Data block
+  TE_wrn_SP : INT ;	//Temp warning threshold
+  TE_flt_SP : INT ;	//Temp fault thresold
+END_VAR
+VAR_OUTPUT
+  Timeout : BOOL ;	
+END_VAR
+VAR
+  Act : INT ;	//Activity counter value
+  ActLast : INT ;	//Last activity counter value
+  Firmware1 : BYTE ;	//T500 firmware information
+  Firmware2 : BYTE ;	//T500 firmware information
+  Firmware3 : BYTE ;	//T500 firmware information
+  T_TO : "TON";	//Activity timeout timer
+  T_TO_start : BOOL ;	//Start trigger for timeout timer
+END_VAR
+VAR_TEMP
+  AR1reg : DINT ;	//Store AR1
+  AR2reg : DINT ;	//Store AR2
+  Value : INT ;	//Temp storage for status value read from F500
+  DPaddrPtr : DINT ;	//Pointer to peripheral address
+  LoopCount : INT ;	//Loop counter
+  Value2 : INT ;	
+  Is_NTC : BOOL ;	//Indicates valid temperature for NTC sensor
+  Is_NTC_pos : BOOL ;	
+  Is_NTC_neg : BOOL ;	
+  Wrn_SP : INT ;	//Temporary warning threshold
+  Flt_SP : INT ;	//Temporary fault threshold
+  Node : INT ;	
+  Sensor : INT ;	
+  TmpTO : BOOL ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Convert peripheral start address
+//The hardware must be configured to form 242 consecutive bytes that we can read 
+//out here. The composition of the slots in the hardware configuration is not 
+//relevant.
+      L     #DPADDR; 
+      ITD   ; 
+      SLD   3; 
+      T     #DPaddrPtr; 
+
+NETWORK
+TITLE =Activity counter - signal timeout
+//THe activity counter value will increment each time the F500 receives new data 
+//from the T500. At 255 the value rolls over to 0. Delay between updates may be 
+//up to 5 s. The manual mentions a 15 s timeout value.
+      LAR1  #DPaddrPtr; // Pointer to start of peripheral address
+      L     PIB [AR1,P#1.0]; // Byte 1: read activity counter
+      T     #Act; 
+
+      L     #Act; // Start timer if unchanged
+      L     #ActLast; 
+      ==I   ; 
+      =     #T_TO.IN; 
+
+      CALL #T_TO (// Execute TON timer
+           PT                       := T#15S,
+           Q                        := #Timeout);
+
+      L     #Act; // Store current value
+      T     #ActLast; 
+
+
+// Save the timer output to the local stack for when AR2 has been manipulated
+
+      A     #T_TO.Q; 
+      =     #TmpTO; // Save timer output to local stack
+
+NETWORK
+TITLE =Read firmware information
+//Store the T500 firmware information. Useful? Version should be >7 for 
+//Profibus DP. Data received may require decoding.
+      LAR1  #DPaddrPtr; // Pointer to start of peripheral address
+
+      L     PIB [AR1,P#239.0]; // Read firmware bytes 1..3
+      T     #Firmware1; 
+
+      L     PIB [AR1,P#240.0]; 
+      T     #Firmware2; 
+
+      L     PIB [AR1,P#241.0]; 
+      T     #Firmware3; 
+
+NETWORK
+TITLE =Copy inputs to local stack
+//To prevent access to the DB registers we copy the inputs to the local stack.
+      L     #TE_wrn_SP; 
+      T     #Wrn_SP; 
+
+      L     #TE_flt_SP; 
+      T     #Flt_SP; 
+
+NETWORK
+TITLE =Save AR2
+//This FB modifies AR2. Before accessing any instance data from this FB, restore 
+//AR2 first. (Since this FBs instance data is only called from one network the 
+//AR2 register should contain all 0.)
+      TAR2  #AR2reg; 
+
+NETWORK
+TITLE =Open the nodes data block
+//Execute this after the activity check as that accesses the instance data.
+//
+//
+      OPN   #DATA; 
+
+// Note: after this avoid explicit addressing that alters AR1 or AR2.
+// Only use global markers, the local stack (TEMP), peripheral I/O, etc.
+NETWORK
+TITLE =Read sensor alarms
+//Each bit represents a sensor. One nibble per node (no alarm for the internal 
+//ambient temperature sensor), so for 32 nodes we have 16 bytes. We copy 
+//the bytes per double word to the DB.
+//
+//Byte 169 bits 4-7: node  2 || bits 0-3: node  1
+//..
+//Byte 184 bits 4-7: node 32 || bits 0-3: node 31
+      LAR1  #DPaddrPtr; // Pointer to start of peripheral address
+      LAR2  P#0.0; // Pointer to start of DB
+
+      L     4; 
+L1:   T     #LoopCount; 
+
+      L     PID [AR1,P#169.0]; // Read 16 alarm bits (bytes 169..184)
+      T     DBD [AR2,P#320.0]; // DB."SensorAlarms"[n..n+15]
+
+      +AR1  P#4.0; // Increment AR1 4 bytes
+      +AR2  P#4.0; // Increment AR2 4 bytes
+
+      L     #LoopCount; 
+      LOOP  L1; 
+
+NETWORK
+TITLE =Read node types
+//Each nibble represent 1 node, so 2 nodes represented in 1 byte. We read one 
+//byte, store the lower nibble to NodeType[n], shift the value 4 bits right and 
+//store in NodeType[n+1]. For good measure we *should* implement both sensor 
+//types TN4 and SN2, but we only use TN4 so we treat all data as TN4. Also set 
+//the appropriate bit in the SensorStatus array for the sensor.
+//
+//Byte 189: bits 4-7: node  2 || bits 0-3: node  1
+//..
+//Byte 204: bits 4-7: node 32 || bits 0-3: node 31
+//
+//Value = 0 : B#16#0000 Node not scanned
+//Value = 1 : B#16#0001 Node is TN4 type
+//Value = 2 : B#16#0010 Node is SN2 type
+      LAR1  #DPaddrPtr; // Pointer to start of peripheral address
+      LAR2  P#0.0; // Pointer to start of DB
+
+      L     16; // Read 16 peripheral bytes
+L2:   T     #LoopCount; 
+
+      L     PIB [AR1,P#189.0]; // a) Read byte x representing sensors y and y+1
+      T     #Value; 
+
+      AW    W#16#F; //    Extract bits 0-3 for sensor y
+      T     DBW [AR2,P#336.0]; //    DB."NodeType"[n]
+      T     #Value2; //    Store single sensor type (extracted 4 bits)
+
+      L     1; 
+      ==I   ; 
+      =     DBX [AR2,P#721.6]; //    DB."SensorStatus"[n].Is_TN4 if type=1
+
+      L     #Value2; 
+      L     2; 
+      ==I   ; 
+      =     DBX [AR2,P#721.7]; //    DB."SensorStatus"[n].Is_SN2 if type=2
+
+      L     #Value; // b) Re-load byte x representing sensors y and y+1
+      AW    W#16#F0; //    Extract bits 4-7 for sensor y+1
+      SRW   4; //    Shift bits 4-7 to 0-3
+      T     DBW [AR2,P#338.0]; //    DB."NodeType"[n+1]
+      T     #Value2; //    Store single sensor type (extracted and shifted 4 bits)
+
+      L     1; //  
+      ==I   ; 
+      =     DBX [AR2,P#723.6]; //    DB."SensorStatus"[n+1].Is_TN4 if type=1
+
+      L     #Value2; //   
+      L     2; 
+      ==I   ; 
+      =     DBX [AR2,P#723.7]; //    DB."SensorStatus"[n+1].Is_SN2 if type=2
+
+//    Increment peripheral pointer by 1 byte; increment type pointer by 2 words
+//    (as we handle two words per iteration)
+
+      +AR1  P#1.0; // Increment AR1 peripheral
+      +AR2  P#4.0; // Increment AR2 data (sensor + 2)
+
+      L     #LoopCount; 
+      LOOP  L2; 
+
+
+
+
+// ***** NOTE *****
+
+// Note: the manual specifies that the type data is contained in bytes 189..204 (0-based).
+// Starting at PIB1216 our ten nodes should be contained in PIB1405..1410. However, I see 
+// the ten nodes in PIB1406..1408, so starting 1 byte further.
+//   a) Typo in manual
+//   b) some misconfiguration in the T500
+//      althougn the values are contained in the expected range
+NETWORK
+TITLE =Read status bytes
+//Note: this network decodes the status value for TN4 sensors only. Data sent by 
+//F500 spans 160 sensors with 4 sensors + ambient temperature per node. (So 5 
+//bytes per node * 32 nodes = 160 values.) We store the temperatures in a 
+//separate array. Should the value from the NTC become an error code we then have 
+//a record of the last known-good temperature. An overtemp fault only occurs if 
+//the value is valid (otherwise it will be a warning).
+//
+//Byte   2 : Node  1, sensor  1
+//Byte   3 :          sensor  2
+//Byte   4 :          sensor  3
+//Byte   5 :          sensor  4
+//Byte   6 :          sensor  5 (node ambient)
+//Byte   7 : Node  2, sensor  1
+//..
+//.. etc
+//..
+//Byte 161 : Node 32, sensor  5 (node ambient)
+// Values returned by the F500:
+// Value    Description from manual
+// -------- --------------------------------------------
+//   0-110  NTC positive temp (0°C to 110°C)
+// 127-158  NTC negative temp (-0°C to -31°C)
+// 238      NTC sensor open circuit
+// 239      Lost communication between T500 and node
+// 240      PTC sensor healthy / cold
+// 241      PTC sensor tripped / hot
+// 250      Contact sensor open / OFF
+// 251      Contact sensor closed / ON
+// 253      Sensor not scanned by T500
+// 254      NTC sensor overtemp fault, temp can't be measured reliably
+// 255      NTC sensor short circuit 
+
+      LAR1  #DPaddrPtr; // Pointer to start of peripheral address
+      LAR2  P#0.0; // Pointer to start of DB
+
+      L     160; // Read 160 bytes from F500
+L3:   T     #LoopCount; 
+
+//    Write custom value 999 to all sensors on a T500 timeout condition
+//    (will be reflected in DBx.NodeWarning[1..32])
+
+      A     #TmpTO; 
+      JCN   L30; 
+      L     999; // Load custom value for T500 comm timeout
+      JU    L31; 
+L30:  L     PIB [AR1,P#2.0]; // Read PIB[2..161]
+L31:  T     DBW [AR2,P#0.0]; // DB."Sensor"[n] := PIB[x]
+      T     #Value; 
+
+      SET   ; // Clear NTC status (indicates sensor is NTC)
+      R     #Is_NTC; 
+
+//    Value = 0..110 - NTC positive temperature 0..110
+
+      A(    ; // a) Value is positive temperature 0..110
+      L     #Value; 
+      L     0; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #Value; 
+      L     110; 
+      <=I   ; 
+      )     ; 
+      =     #Is_NTC_pos; //    Value is valid/positive (use for warning/fault)
+      JCN   L3a; 
+      L     #Value; 
+      T     DBW [AR2,P#400.0]; //    DB."Temps"[n] := #Value
+      SET   ; 
+      S     #Is_NTC; 
+
+//    Value = 127..158 - NTC negative temperature 0..-31
+
+L3a:  A(    ; // b) Value is negative temperature 0..-31
+      L     #Value; 
+      L     127; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #Value; 
+      L     158; 
+      <=I   ; 
+      )     ; 
+      JCN   L3b; 
+      L     127; 
+      L     #Value; 
+      -I    ; 
+      T     DBW [AR2,P#400.0]; //    DB."Temps"[n] := 127 - #Value
+      SET   ; 
+      S     #Is_NTC; 
+
+//    Value = 238 - NTC sensor open circuit
+
+L3b:  L     #Value; // DB."SensorStatus"[n].NTC_open       : NTC open circuit
+      L     238; 
+      ==I   ; 
+      =     DBX [AR2,P#720.1]; 
+      S     #Is_NTC; 
+
+//    Value = 255 - NTC sensor short circuit
+
+      L     #Value; // DB."SensorStatus"[n].NTC_short      : NTC short circuit
+      L     255; 
+      ==I   ; 
+      =     DBX [AR2,P#720.2]; 
+      S     #Is_NTC; 
+
+//    Value = 254 - NTC sensor over temperature fault, temperature Cannot be measured reliably
+
+      L     #Value; // DB."SensorStatus"[n].NTC_TE_fault   : NTC TE fault
+      L     254; 
+      ==I   ; 
+      =     DBX [AR2,P#720.3]; 
+      S     #Is_NTC; 
+
+//    Indicate sensor is NTC type
+
+      A     #Is_NTC; // DB."SensorStatus"[n].NTC            : Sensor is NTC
+      =     DBX [AR2,P#720.0]; 
+
+//    Value = 250 - contact sensor contact open / off
+
+      L     #Value; // DB."SensorStatus[n].Contact_open    : Contact open/off
+      L     250; 
+      ==I   ; 
+      =     DBX [AR2,P#720.4]; 
+
+//    Value = 251 - contact sensor closed / off
+
+      L     #Value; // DB."SensorStatus"[n].Contact_closed : Contact closed/on
+      L     251; 
+      ==I   ; 
+      =     DBX [AR2,P#720.5]; 
+
+//    Value = 253 - sensor not scaned by T500
+
+      L     #Value; // DB."SensorStatus"[n].Not_scanned    : Sensor not scanned by T500
+      L     253; 
+      ==I   ; 
+      =     DBX [AR2,P#720.6]; 
+
+//    Value 239 - lost communication between T500 and node
+
+      L     #Value; // DB."SensorStatus"[n].Comm_lost      : Comm lost between T500 and node
+      L     239; 
+      ==I   ; 
+      =     DBX [AR2,P#720.7]; 
+
+// --- Evaluate warning and fault conditions ---
+
+//   Temperature warning
+
+      L     #Value; 
+      L     #Wrn_SP; 
+      >I    ; 
+      A     #Is_NTC_pos; // Only for valid positive temperature
+      AN    DBX [AR2,P#721.3]; // (Suppress warning during fault)
+      =     DBX [AR2,P#721.2]; // DB."SensorStatus"[n].TE_warning     :
+
+//    Temperature fault
+
+      L     #Value; 
+      L     #Flt_SP; 
+      >I    ; 
+      A     #Is_NTC_pos; // Only for valid positive temperature
+      =     DBX [AR2,P#721.3]; // DB."SensorStatus"[n].TE_fault       : Over temp, unreliable
+
+//    Tracking warning (make same as fault but use without a delay)
+
+      A     DBX [AR2,P#720.4]; // DB."SensorStatus"[n].Contact_open   : Contact open/off
+      =     DBX [AR2,P#721.4]; // DB."SensorStatus"[n].Track_warning  : Tracking warning
+
+//    Tracking fault (warning=fault at this moment)
+
+      A     DBX [AR2,P#720.4]; // DB."SensorStatus"[n].Contact_open   : Contact open/off
+      =     DBX [AR2,P#721.5]; // DB."SensorStatus"[n].Track_fault    : Tracking fault
+
+//    Combined warning for sensor
+
+      O     DBX [AR2,P#720.1]; // DB."SensorStatus"[n].NTC_open       : NTC open circuit
+      O     DBX [AR2,P#720.2]; // DB."SensorStatus"[n].NTC_short      : NTC short circuit
+      O     DBX [AR2,P#720.7]; // DB."SensorStatus"[n].Comm_lost      : Comm lost between T500 and node
+      O     DBX [AR2,P#721.2]; // DB."SensorStatus"[n].TE_warning     : TE warning
+      O     DBX [AR2,P#721.4]; // DB."SensorStatus"[n].Track_warning  : Tracking warning
+      O(    ; 
+      L     #Value; // Custom value for T500 comm timeout
+      L     999; 
+      ==I   ; 
+      )     ; 
+      =     DBX [AR2,P#721.0]; // DB."SensorStatus"[n].Warning        : combined Warning
+
+//    Combined fault for sensor
+
+      O     DBX [AR2,P#720.3]; // DB."SensorStatus"[n].NTC_TE_fault   : NTC TE fault
+      O     DBX [AR2,P#720.4]; // DB."SensorStatus"[n].Contact_open   : Contact open/off
+      O     DBX [AR2,P#721.3]; // DB."SensorStatus"[n].TE_fault       : TE fault
+      O     DBX [AR2,P#721.5]; // DB."SensorStatus"[n].Track_fault    : Tracking fault
+      =     DBX [AR2,P#721.1]; // DB."SensorStatus"[n].Fault          : combined fault
+
+      +AR1  P#1.0; // Increment AR1 (peripheral values are bytes)
+      +AR2  P#2.0; // Increment AR2 (DB stores values as INT)
+
+      L     #LoopCount; 
+      LOOP  L3; 
+
+NETWORK
+TITLE =Group the sensor alarms per node
+//In this network we group the sensor alarms per node for easier processing 
+//later. We have separate alarms for tracking and bearing temperatures per node 
+//because these are separately logged in the alarms logging. Then the equipment 
+//processing logic only has to deal with two node alarms per elevator (top and 
+//bottom nodes).
+//
+//Layout of the nodes DB:
+//DBB     PIB     Array             Length     Type
+//------  ------  ----------------  ---------  --------
+//1040.0       -  NodeWarning       [1..32]    BOOL
+//1044.0       -  NodeFault         [1..32]    BOOL
+//1048.0       -  NodeTEwarning     [1..32]    BOOL
+//1052.0       -  NodeTEfault       [1..32]    BOOL
+//1056.0       -  NodeTrackWarning  [1..32]    BOOL
+//1060.0       -  NodeTrackFault    [1..32]    BOOL
+// Clear all alarms: 6 arrays of 32 bits = 6 dwords
+
+      LAR2  P#0.0; // Point to start of DB
+      L     L#0; 
+      T     DBD [AR2,P#1040.0]; // DBx.NodeWarning[1..32]      BOOL
+      T     DBD [AR2,P#1044.0]; // DBx.NodeFault[1..32]        BOOL
+      T     DBD [AR2,P#1048.0]; // DBx.NodeTEwarning[1..32]    BOOL
+      T     DBD [AR2,P#1052.0]; // DBx.NodeTEfault[1..32]      BOOL
+      T     DBD [AR2,P#1056.0]; // DBx.NodeTrackWarning[1..32] BOOL
+      T     DBD [AR2,P#1060.0]; // DBx.NodeTrackFault[1..32]   BOOL
+
+// Pointer to sensor alarms, start at sensor 1 of 160
+
+      LAR1  P#720.0; // DBx.SensorStatus[1..160] 16*BOOL
+
+// Point AR1 to the first sensor and increment 2 bytes per sensor.
+// Point AR2 to 0.0 and increment per bit. Use an offset equal the start 
+// address of the array to make clear where we are writing data.
+
+      LAR2  P#0.0; 
+
+      L     32; // Iterate 32 nodes
+L12A: T     #Node; // --- Node loop ---
+
+      L     5; // Iterate 5 sensors per node
+L12B: T     #Sensor; // --- Sensor loop ---
+
+      A     DBX [AR1,P#1.2]; // DBx.SensorStatus[n].TE_Warning
+      S     DBX [AR2,P#1048.0]; // DBx.NodeTEwarning[x]
+
+      A     DBX [AR1,P#1.3]; // DBx.SensorStatus[n].TE_Fault
+      S     DBX [AR2,P#1052.0]; // DBx.NodeTEfault[x]
+
+      A     DBX [AR1,P#1.4]; // DBx.SensorStatus[n].Track_Warning
+      S     DBX [AR2,P#1056.0]; // DBx.NodeTrackWarning[x]
+
+      A     DBX [AR1,P#1.5]; // DBx.SensorStatus[n].Track_Fault
+      S     DBX [AR2,P#1060.0]; // DBx.NodeTrackFault[x]
+
+      A     DBX [AR1,P#1.0]; // DBx.SensorStatus[n].Warning
+      S     DBX [AR2,P#1040.0]; // DBx.NodeWarning[x]
+
+      A     DBX [AR1,P#1.1]; // DBx.SensorStatus[n].Fault
+      S     DBX [AR2,P#1044.0]; // DBx.NodeFault[x]
+
+      +AR1  P#2.0; // Increment AR1 to next SensorStatus
+
+      L     #Sensor; 
+      LOOP  L12B; // --- /Sensor loop ---
+
+      +AR2  P#0.1; // Increment AR2 one bit
+
+      L     #Node; 
+      LOOP  L12A; // --- /Node loop ---
+
+NETWORK
+TITLE =Restore AR2
+//Out of precaution we restore AR2 before returning to the calling block (even 
+//though this is the end of the code).
+      LAR2  #AR2reg; 
+
+END_FUNCTION_BLOCK
+
