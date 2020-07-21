@@ -24,7 +24,7 @@ Example for config/comm with FM350-1:
 
       A     DBn.STS_SYNC            // DB specified in FM352-1 call DBn.DBX43.5
       FP    "Encoder_Z_fp"
-      =     "Enc_Z"                 // Encoder Z one-shot
+      =     "Enc_Z"                 // Encoder Z one-shot (use for FM_STS_SET input of distributor FB call)
       S     "Enc_reset_sync"        // Request to FM
 
 
