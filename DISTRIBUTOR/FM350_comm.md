@@ -50,11 +50,9 @@ Example for config/comm with FM350-1:
        RES_SYNC:="Enc_reset_sync"
        RES_ZERO:=
 
-// --- Configure the FB call ---
+// Configure the FB call
 
-// -------------------------------------
-// Enable the home index proxy
-// -------------------------------------
+// +++ Enable the home index proxy +++
 
 // This is enabled by default, so if this distributor is not equipped with one
 // it must be disabled here.
