@@ -6,3 +6,8 @@ This is an improvement of the standard Siemens FC105 SCALE, since here we can sp
 ADCHK
 
 Verify A/D value validity: detect undershoot/underrange, overshhot/overrange.
+
+
+PCT_AD
+
+Convert a pseudo percentage 0-100 to an A/D value.
