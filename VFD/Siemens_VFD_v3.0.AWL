@@ -1,5 +1,6 @@
-FUNCTION_BLOCK FB 95
-TITLE =Siemens VFD
+FUNCTION_BLOCK FB 63
+TITLE =Siemens VFD Micro Master 4 & Sinamics
+//KNOW_HOW_PROTECT
 //VFD control for Siemens Simovert Micro Master 4 and Sinamics drives.
 //
 //Micro Master 4: PPo 1 mode:        4 * PKW + 2 * PZD
@@ -26,7 +27,6 @@ VAR_OUTPUT
   Running : BOOL ;	//Drive running either left or right
   Warning : BOOL ;	//Drive warning is active
   Fault : BOOL ;	//Drive fault is active
-  Internal_error : BOOL ;	//Data error
   Diag_code : DINT ;	//Current diagnostics code
 END_VAR
 VAR
@@ -457,7 +457,7 @@ VAR
   Motor_Right : BOOL ;	//Drive running right 
   Motor_Left : BOOL ;	//Drive running left
   Commission : STRUCT 	
-   Spare1 : BOOL ;	//Not used
+   Internal_error : BOOL ;	//Not used
    Spare2 : BOOL ;	//Not used
    Spare3 : BOOL ;	//Not used
    Spare4 : BOOL ;	//Not used
@@ -1191,7 +1191,7 @@ TITLE =Start fault acknowledgement
       AN    #RESET; 
       JC    FEE; 
       SET   ; 
-      R     #Internal_error; 
+      R     #Commission.Internal_error; 
       LAR1  P##Data_fault; 
       L     L#0; // Clear 32 job fault bits
       T     DID [AR1,P#0.0]; 
@@ -1509,7 +1509,7 @@ pa7a: T     #Job_fault_NR;
       R     DIX [AR2,P#0.0]; 
       R     #Intern.Job_an; 
       AN    #Intern.Trans_Para.Stop_fault_estimation; 
-      S     #Internal_error; 
+      S     #Commission.Internal_error; 
       L     P##Data_fault; 
       L     #P_Job_bits; 
       -D    ; 
