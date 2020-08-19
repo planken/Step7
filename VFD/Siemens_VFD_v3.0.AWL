@@ -1,5 +1,5 @@
-FUNCTION_BLOCK FB 83
-TITLE =Siemens VFD Micro Master 4 & Sinamics
+FUNCTION_BLOCK FB 95
+TITLE =Siemens VFD
 //VFD control for Siemens Simovert Micro Master 4 and Sinamics drives.
 //
 //Micro Master 4: PPo 1 mode:        4 * PKW + 2 * PZD
@@ -26,6 +26,7 @@ VAR_OUTPUT
   Running : BOOL ;	//Drive running either left or right
   Warning : BOOL ;	//Drive warning is active
   Fault : BOOL ;	//Drive fault is active
+  Internal_error : BOOL ;	//Data error
   Diag_code : DINT ;	//Current diagnostics code
 END_VAR
 VAR
@@ -456,7 +457,7 @@ VAR
   Motor_Right : BOOL ;	//Drive running right 
   Motor_Left : BOOL ;	//Drive running left
   Commission : STRUCT 	
-   Internal_error : BOOL ;	//Not used
+   Spare1 : BOOL ;	//Not used
    Spare2 : BOOL ;	//Not used
    Spare3 : BOOL ;	//Not used
    Spare4 : BOOL ;	//Not used
@@ -499,14 +500,21 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Version history
-//v 3.00 06Jun19/STP
+//v 3.00 01Aug20/STP
 //        - Added job 11 r2131 (fault) and job 12 r2132 (warning) for Sinamics
 //          drives to compensate for a firmware bug where the drive gets stuck on
 //          the diag display and warnings do not auto clear. Siemens is aware.
-//v 2.14 14May19/STP
 //        - Removed Micromaster commissioning code, freeing up several parameter
 //          jobs.
 //        - Enabled the use of drive data set 4 for Sinamics.
+//v 2.15 22Jan20/STP
+//        - Added job 26 r0024 actual motor frequency and send this value to
+//          the interface output as opposed to the calculated value. Value in Hz
+//          for both MicroMaster and Sinamics.
+//        - Added/corrected tag comments.
+//        - Corrected MM drive detection (used >= and <= instead of > and <). 
+//        - Moved internal error flag to commissioning structure.
+//        - Requires regenerating instance data block.
 //v 2.14 06May19/STP
 //        - Bug fix: job 25 index was incorrectly set to 1.
 //        - Modified drive detection.
@@ -1183,7 +1191,7 @@ TITLE =Start fault acknowledgement
       AN    #RESET; 
       JC    FEE; 
       SET   ; 
-      R     #Commission.Internal_error; 
+      R     #Internal_error; 
       LAR1  P##Data_fault; 
       L     L#0; // Clear 32 job fault bits
       T     DID [AR1,P#0.0]; 
@@ -1501,7 +1509,7 @@ pa7a: T     #Job_fault_NR;
       R     DIX [AR2,P#0.0]; 
       R     #Intern.Job_an; 
       AN    #Intern.Trans_Para.Stop_fault_estimation; 
-      S     #Commission.Internal_error; 
+      S     #Internal_error; 
       L     P##Data_fault; 
       L     #P_Job_bits; 
       -D    ; 
