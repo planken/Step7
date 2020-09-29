@@ -76,7 +76,7 @@ NETWORK
 TITLE =Check which options to use
 //v4.3:  11Oct16: Added takeup detection input.
 //       Options: bit 0 = CD sensor
-//                bit 1 = SS sensor (pusle)
+//                bit 1 = SS sensor (pulse)
 //                bit 2 = SS sensor (4B Whirligig)
 //                bit 3 = TD sensor
 //       Note: Bit 1 & 2 cannot be combined
