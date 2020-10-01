@@ -1,5 +1,5 @@
 FUNCTION_BLOCK "Scan outputs v2.0P"
-TITLE =Cycle bins to monitor high level sensors
+TITLE =Cycle jet solenoid outputs for bag house
 KNOW_HOW_PROTECT
 AUTHOR : STP
 VERSION : 2.0
