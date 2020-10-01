@@ -1,0 +1,220 @@
+FUNCTION_BLOCK "Scan outputs v2.0P"
+TITLE =Cycle bins to monitor high level sensors
+KNOW_HOW_PROTECT
+AUTHOR : STP
+VERSION : 2.0
+
+
+VAR_INPUT
+  Enable : BOOL ;	//Request pulse scan operation
+  On_time : TIME ;	//Pulse ON Duration Time
+  Off_time : TIME ;	//Delay from one pulse to the next
+  Nbr_outputs : INT ;	//This is the actual number of pulses used
+END_VAR
+VAR_OUTPUT
+  Pulse_1_Out : BOOL ;	//Pulse Out #1
+  Pulse_2_Out : BOOL ;	//Pulse Out #2
+  Pulse_3_Out : BOOL ;	//Pulse Out #3
+  Pulse_4_Out : BOOL ;	//Pulse Out #4
+  Pulse_5_Out : BOOL ;	//Pulse Out #5
+  Pulse_6_Out : BOOL ;	//Pulse Out #6
+  Pulse_7_Out : BOOL ;	//Pulse Out #7
+  Pulse_8_Out : BOOL ;	//Pulse Out #8
+  Pulse_9_Out : BOOL ;	//Pulse Out #9
+  Pulse_10_Out : BOOL ;	//Pulse Out #10
+  Pulse_11_Out : BOOL ;	//Pulse Out #11
+  Pulse_12_Out : BOOL ;	//Pulse Out #12
+  Pulse_13_Out : BOOL ;	//Pulse Out #13
+  Pulse_14_Out : BOOL ;	//Pulse Out #14
+  Pulse_15_Out : BOOL ;	//Pulse Out #15
+  Pulse_16_Out : BOOL ;	//Pulse Out #16
+END_VAR
+VAR
+  Cycle_on : BOOL ;	
+  On_pls : BOOL ;	
+  Active_output : INT ;	
+  On_timer : "TON";	
+  Off_timer : "TON";	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Enable cycling
+//Enable cycling if:
+// - Enable input active.
+// - Delay time is valid.
+// - Pulse time is valid.
+      A     #Enable; 
+      A(    ; 
+      L     #Off_time; 
+      L     T#0MS; 
+      >D    ; 
+      )     ; 
+      A(    ; 
+      L     #Off_time; 
+      L     T#0MS; 
+      >D    ; 
+      )     ; 
+      =     #Cycle_on; 
+NETWORK
+TITLE =Accumulate on time
+
+      A     #Cycle_on; 
+      AN    #Off_timer.Q; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #On_timer (
+           IN                       := L      0.0,
+           PT                       := #Off_time);
+
+      NOP   0; 
+NETWORK
+TITLE =Accumulate off time
+
+      A     #Cycle_on; 
+      A     #On_timer.Q; 
+      =     L      0.0; 
+      BLD   103; 
+      CALL #Off_timer (
+           IN                       := L      0.0,
+           PT                       := #On_time);
+
+      NOP   0; 
+NETWORK
+TITLE =Shift to next output
+
+      A(    ; 
+      A     #On_timer.Q; 
+      FP    #On_pls; 
+      JNB   _001; 
+      L     #Active_output; 
+      L     1; 
+      +I    ; 
+      T     #Active_output; 
+      AN    OV; 
+      SAVE  ; 
+      CLR   ; 
+_001: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Active_output; 
+      L     #Nbr_outputs; 
+      >I    ; 
+      )     ; 
+      JNB   _002; 
+      L     1; 
+      T     #Active_output; 
+_002: NOP   0; 
+NETWORK
+TITLE =Reset active output when not in use
+
+      AN    #Enable; 
+      JNB   _003; 
+      L     1; 
+      T     #Active_output; 
+_003: NOP   0; 
+NETWORK
+TITLE =Activate appropriate output
+
+      L     #Active_output; 
+      L     1; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_1_Out; 
+
+      L     #Active_output; 
+      L     2; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_2_Out; 
+
+      L     #Active_output; 
+      L     3; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_3_Out; 
+
+      L     #Active_output; 
+      L     4; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_4_Out; 
+
+      L     #Active_output; 
+      L     5; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_5_Out; 
+
+      L     #Active_output; 
+      L     6; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_6_Out; 
+
+      L     #Active_output; 
+      L     7; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_7_Out; 
+
+      L     #Active_output; 
+      L     8; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_8_Out; 
+
+      L     #Active_output; 
+      L     9; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_9_Out; 
+
+      L     #Active_output; 
+      L     10; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_10_Out; 
+
+      L     #Active_output; 
+      L     11; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_11_Out; 
+
+      L     #Active_output; 
+      L     12; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_12_Out; 
+
+      L     #Active_output; 
+      L     13; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_13_Out; 
+
+      L     #Active_output; 
+      L     14; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_14_Out; 
+
+      L     #Active_output; 
+      L     15; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_15_Out; 
+
+      L     #Active_output; 
+      L     16; 
+      ==I   ; 
+      A     #On_timer.Q; 
+      =     #Pulse_16_Out; 
+
+NETWORK
+TITLE =Force ENO
+
+      SET   ; 
+      SAVE  ; 
+END_FUNCTION_BLOCK
+
