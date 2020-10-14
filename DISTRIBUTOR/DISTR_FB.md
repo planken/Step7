@@ -2,7 +2,7 @@ Distributor FB v2.7 interface description
 26Jul16
 
 
-#Input#
+# Input #
 
 *Lookup_DB* [BLOCK_DB]: DB block number of the lookup table. The lookup table is a collection of 32 integer pairs: equipment number (bin number) and corresponding encoder count. These values ought to be written as initial values and the DB ought to be write-protected in the PLC to ensure no values will be overwritten. This block is not organized as an array, as in Step 7 classic array elements cannot have initial values/comments.
 
@@ -27,7 +27,7 @@ Distributor FB v2.7 interface description
 *Equip_SP* [INT]: The desired bin setpoint to be achieved. This value will be looked up in the lookup table to retrieve the associated counter value for that position.
 
 
-#Output#
+# Output #
 
 *EquipNbrCurrent* [INT]: Reported actual bin number. As soon as a new position is requested, this value will become 0. Once the position has been achieved, this value will reflect the desired position.
 
@@ -40,7 +40,7 @@ Distributor FB v2.7 interface description
 *MotorRunRev* [BOOL]: Coil for the reverse contactor.
 
 
-#Input / output (alarms)#
+# Input / output (alarms) #
 
 *MotorStartFault* [BOOL]: Alarm: The forward / reverse contactor did not respond within the allotted time for UserConfig.MotorFaultTime. If no contactor feedback is desired, then the inputs MotorStatusFwd / MotorStatusRev could be fed with the contactor outputs. If made TRUE permanently, the motor will report "running" continuously. Depending on the control system wiring, this fault could also occur on a tripped overload. Correct the problem and issue a reset.
 
@@ -53,7 +53,7 @@ Distributor FB v2.7 interface description
 *GeneralFault* [BOOL]: Alarm: Combined fault for use with an HMI (as often only one boolean can be used for the visibility of an object). This value is TRUE with one or more active faults.
 
 
-#Configuration options#
+# Configuration options #
 
 Several options can be written to the instance datablock directly. This is done to reduce the complexity of the interface, as most of these values will likely not change often.
 
@@ -84,7 +84,7 @@ Several options can be written to the instance datablock directly. This is done 
 *UserConfig.ManualJogTime* [TIME] (initial value: 50ms): Duration for contactor being energized for forward or reverse. Typically, this should be short enough to allow for small movements and long enough to allow the motor to move the distributor.
 
 
-#Calibration (optional)#
+# Calibration (optional) #
 
 *Exec_home_cal*: Set this value to TRUE (using a one-shot) to initiate a calibration. Care should be taken that this is not executed during operations, as the distributor may immediately move to seek the home index and may introduce or update a bias to the encoder count value in order to bring the home index back to the specified value. A calibration only takes place in forward direction.
 
