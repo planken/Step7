@@ -5,7 +5,7 @@ This is an improvement of the standard Siemens FC105 SCALE, since here we can sp
 
 ADCHK
 
-Verify A/D value validity: detect undershoot/underrange, overshhot/overrange.
+Verify A/D value validity: detect undershoot/underrange, overshoot/overrange.
 
 
 PCT_AD
