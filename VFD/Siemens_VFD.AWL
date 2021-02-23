@@ -1,0 +1,1944 @@
+FUNCTION_BLOCK FB 63
+TITLE =Siemens VFD Micro Master 4 & Sinamics
+//KNOW_HOW_PROTECT
+//VFD control for Siemens Simovert Micro Master 4 and Sinamics drives.
+//
+//Micro Master 4: PPo 1 mode:        4 * PKW + 2 * PZD
+//Sinamics:       Telegram 353 mode: 4 * PIV + 2 * PZD
+AUTHOR : STP
+NAME : MM_SIN
+VERSION : 3.0
+CODE_VERSION1
+
+
+VAR_INPUT
+  ADDRESS : INT  := 300;	//Peripheral address of the drive
+  Run : BOOL ;	//Control system run permissive (OFF1)
+  Coast : BOOL ;	//0=RFG stop; 1=coast stop (=remove pulses immediately on stop)
+  RESET : BOOL ;	//Reset errors
+  Setpoint : INT ;	//Speed setpoint [-199% ... + 199%] 
+END_VAR
+VAR_OUTPUT
+  Speed : INT ;	//Actual relative motor speed as %
+  Current : REAL ;	//Actual motor current
+  Torque : REAL ;	//Actual motor torque
+  RPM : REAL ;	//Actual motor RPM
+  Frequency : REAL ;	//Actual motor Frequency
+  Running : BOOL ;	//Drive running either left or right
+  Warning : BOOL ;	//Drive warning is active
+  Fault : BOOL ;	//Drive fault is active
+  Diag_code : DINT ;	//Current diagnostics code
+END_VAR
+VAR
+  Job : STRUCT 	
+   Req_1 : BOOL ;	//r0027: actual motor current
+   Req_2 : BOOL ;	//r0080: actual motor torque
+   Req_3 : BOOL ;	//Custom R/W parameters
+   Req_4 : BOOL ;	//Free
+   Req_5 : BOOL ;	//Store mode (RAM/EEPROM)
+   Req_6 : BOOL ;	//Free
+   Req_7 : BOOL ;	//Free
+   Req_8 : BOOL ;	//Free
+   Req_9 : BOOL ;	//Store to NVRAM
+   Req_10 : BOOL ;	//Free
+   Req_11_fault : BOOL ;	//r2131: fault
+   Req_12_warning : BOOL ;	//r2132: warning
+   Req_13_warnings : BOOL ;	//Display: Read last warnings
+   Req_14_faults : BOOL ;	//Display: Read last fault messages
+   Req_15_Faults : BOOL ;	//Display: Read fault value (service information) 
+   Req_16_Firmware : BOOL ;	//Display: Firm / Product type / Version / Date
+   Req_17 : BOOL ;	//r0022: actual motor RPM
+   Req_18 : BOOL ;	//P0311: rated motor RPM
+   Req_19 : BOOL ;	//P0305: rated motor current
+   Req_20 : BOOL ;	//P2000: reference speed
+   Req_21 : BOOL ;	//r0070: actual DC link voltage
+   Req_22 : BOOL ;	//P0305: rated motor frequency
+   Req_23 : BOOL ;	//P0820: DDS bit 0 source
+   Req_24 : BOOL ;	//P0821: DDS bit 1 source
+   Req_25 : BOOL ;	//R0051: Active Drive Data Set
+   Req_26 : BOOL ;	//Free
+   Req_27 : BOOL ;	//Free
+   Req_28 : BOOL ;	//Free
+   Req_29 : BOOL ;	//Free
+   Req_30 : BOOL ;	//Free
+   Req_31 : BOOL ;	//Free
+   Req_32 : BOOL ;	//r0053: ZSW 2
+  END_STRUCT ;	
+  Data_fault : STRUCT 	
+   JOB : STRUCT 	
+    Req_1 : BOOL ;	
+    Req_2 : BOOL ;	
+    Req_3 : BOOL ;	
+    Req_4 : BOOL ;	
+    Req_5 : BOOL ;	
+    Req_6 : BOOL ;	
+    Req_7 : BOOL ;	
+    Req_8 : BOOL ;	
+    Req_9 : BOOL ;	
+    Req_10 : BOOL ;	
+    Req_11 : BOOL ;	
+    Req_12 : BOOL ;	
+    Req_13 : BOOL ;	
+    Req_14 : BOOL ;	
+    Req_15 : BOOL ;	
+    Req_16 : BOOL ;	
+    Req_17 : BOOL ;	
+    Req_18 : BOOL ;	
+    Req_19 : BOOL ;	
+    Req_20 : BOOL ;	
+    Req_21 : BOOL ;	
+    Req_22 : BOOL ;	
+    Req_23 : BOOL ;	
+    Req_24 : BOOL ;	
+    Req_25 : BOOL ;	
+    Req_26 : BOOL ;	
+    Req_27 : BOOL ;	
+    Req_28 : BOOL ;	
+    Req_29 : BOOL ;	
+    Req_30 : BOOL ;	
+    Req_31 : BOOL ;	
+    Req_32 : BOOL ;	
+   END_STRUCT ;	
+   Nr : INT ;	//Fault Nr
+   DP_Add_info : WORD ;	//Fault message from SFC 14/15
+   Request_Nr : INT ;	//[1..32] points at the faulty job
+   Index : INT ;	//Request index 
+   Parameter_Nr : INT ;	//Parameter_Nr from the faulty job
+   Fault_Commissioning : INT ;	
+  END_STRUCT ;	
+  Job_1 : STRUCT 	//r0027: actual motor current
+   Parameter_Nr : INT  := 27;	//r0027 Act. filtered output current
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Motor_current : REAL ;	
+   Value_2 : DINT ;	
+   Value_3 : DINT ;	
+  END_STRUCT ;	
+  Job_2 : STRUCT 	//r0080: actual motor torque
+   Parameter_Nr : INT  := 80;	//r0080: Act. torque
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Motor_torque : REAL ;	
+   Value_2 : DINT ;	
+   Value_3 : DINT ;	
+  END_STRUCT ;	
+  Job_3 : STRUCT 	//Custom R/W parameters
+   Parameter_Nr : INT ;	//Parameter Nr from parameter list
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT ;	
+   Value_2 : DINT ;	
+   Value_3 : DINT ;	
+  END_STRUCT ;	
+  Job_4 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Job 4: free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT ;	//0: Fest set to 0
+  END_STRUCT ;	
+  Job_5 : STRUCT 	//Free
+   Parameter_Nr : INT  := 14;	//Store mode (RAM/EEPROM)
+   Index : INT  := 2;	//2: Profibus / CB
+   Identifier : BYTE  := B#16#2;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT ;	//0:Keep all the parameters as it was defined in the request 
+  END_STRUCT ;	
+  Job_6 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Job 6: free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT ;	
+  END_STRUCT ;	
+  Job_7 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Job 7: free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT ;	
+  END_STRUCT ;	
+  Job_8 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Job 8: free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT ;	
+  END_STRUCT ;	
+  Job_9 : STRUCT 	//Free
+   Parameter_Nr : INT  := 971;	//Copy values from RAM to EEPROM
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#2;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT  := L#1;	//0: Write all the data as defined  1: Write all values to EEPROM
+  END_STRUCT ;	
+  Job_10 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Job 10: free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DINT ;	
+  END_STRUCT ;	
+  Job_11 : STRUCT 	//Free
+   Parameter_Nr : INT  := 2131;	//Job 11: CO: actual fault code
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Act_fault : DINT ;	//CO: actual fault code
+  END_STRUCT ;	
+  Job_12 : STRUCT 	//Free
+   Parameter_Nr : INT  := 2132;	//Job 12: CO: actual warning code
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Act_warning : DINT ;	//CO: actual warning code
+  END_STRUCT ;	
+  Job_13 : STRUCT 	//Free
+   Parameter_Nr : INT  := 2110;	//Last warnings
+   Index : INT  := 3;	//Subparameter Nr
+   Identifier : BYTE  := B#16#11;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Last_warning_1 : DINT ;	//Last warning        Warning 1
+   Last_warning_2 : DINT ;	//Last warning        Warning 1
+   Old_1_warning_1 : DINT ;	//Last warning - 1    Warning 1
+   Old_1_warning_2 : DINT ;	//Last warning - 1    Warning 2
+  END_STRUCT ;	
+  Job_14 : STRUCT 	//Free
+   Parameter_Nr : INT  := 947;	//Last fault messages
+   Index : INT  := 7;	//Subparameter Nr
+   Identifier : BYTE  := B#16#11;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Last_fault_1 : DINT ;	//Last fault         Fault 1
+   Last_fault_2 : DINT ;	//Last fault         Fault 2
+   Old_1_fault_1 : DINT ;	//Last fault - 1     Fault 1
+   Old_1_fault_2 : DINT ;	//Last fault - 1     Fault 2
+   Old_2_fault_1 : DINT ;	//Last fault - 2     Fault 1
+   Old_2_fault_2 : DINT ;	//Last fault - 2     Fault 2
+   Old_3_fault_1 : DINT ;	//Last fault - 3     Fault 1
+   Old_3_fault_2 : DINT ;	//Last fault - 3     Fault 2
+  END_STRUCT ;	
+  Job_15 : STRUCT 	//Free
+   Parameter_Nr : INT  := 949;	//Fault value  (service information)
+   Index : INT  := 7;	//Subparameter Nr
+   Identifier : BYTE  := B#16#11;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Last_fault_values_1 : DINT ;	//Last fault         Fault value 1
+   Last_fault_values_2 : DINT ;	//Last fault         Fault value 2
+   Old_1_fault_values_1 : DINT ;	//Last fault - 1     Fault value 1
+   Old_1_fault_values_2 : DINT ;	//Last fault - 1     Fault value 2
+   Old_2_fault_values_1 : DINT ;	//Last fault - 2     Fault value 1
+   Old_2_fault_values_2 : DINT ;	//Last fault - 2     Fault value 2
+   Old_3_fault_values_1 : DINT ;	//Last fault - 3     Fault value 1
+   Old_3_fault_values_2 : DINT ;	//Last fault - 3     Fault value 2
+  END_STRUCT ;	
+  Job_16 : STRUCT 	//Free
+   Parameter_Nr : INT  := 964;	//Read firmware version
+   Index : INT  := 4;	//Subparameter Nr
+   Identifier : BYTE  := B#16#11;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Firm : DINT ;	//42: Siemens
+   Type_1 : DINT ;	//MICROMASTER type
+   Firmware_version : DINT ;	//Firmware version
+   Date_year : DINT ;	//Date: year
+   Date_day_month : DINT ;	//Date: day/month
+  END_STRUCT ;	
+  Job_17 : STRUCT 	//r0022: actual motor RPM
+   Parameter_Nr : INT  := 22;	//Actual motor RPM
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Motor_RPM : REAL ;	
+  END_STRUCT ;	
+  Job_18 : STRUCT 	//P0311: rated motor RPM
+   Parameter_Nr : INT  := 311;	//Rated motor RPM
+   Index : INT ;	//Subparameter Nr (overwritten)
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Rated_motor_RPM : DWORD ;	
+  END_STRUCT ;	
+  Job_19 : STRUCT 	//P0305: rated motor current
+   Parameter_Nr : INT  := 305;	//Rated motor current
+   Index : INT ;	//Subparameter Nr (overwritten)
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Rated_motor_current : REAL ;	
+  END_STRUCT ;	
+  Job_20 : STRUCT 	//P2000: reference speed
+   Parameter_Nr : INT  := 2000;	//Reference speed
+   Index : INT ;	//Subparameter Nr (overwritten)
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Reference_speed : REAL ;	
+  END_STRUCT ;	
+  Job_21 : STRUCT 	//r0026: actual DC link voltage
+   Parameter_Nr : INT  := 70;	//Actual DC link voltage
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   DC_link_volt : REAL ;	
+  END_STRUCT ;	
+  Job_22 : STRUCT 	//P0305: rated motor frequency
+   Parameter_Nr : INT  := 310;	//Rated motor frequency
+   Index : INT ;	//Subparameter Nr (overwritten)
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Rated_motor_frequency : REAL ;	
+  END_STRUCT ;	
+  Job_23 : STRUCT 	//Free
+   Parameter_Nr : INT  := 820;	//DDS bit 0 source
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_24 : STRUCT 	//Free
+   Parameter_Nr : INT  := 821;	//DDS bit 1 source
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_25 : STRUCT 	//Free
+   Parameter_Nr : INT  := 51;	//Active Drive Data Set
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_26 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_27 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_28 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_29 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_30 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_31 : STRUCT 	//Free
+   Parameter_Nr : INT ;	//Free
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Value : DWORD ;	
+  END_STRUCT ;	
+  Job_32 : STRUCT 	//Free
+   Parameter_Nr : INT  := 53;	//Status word 2 (ZSW2)
+   Index : INT ;	//Subparameter Nr
+   Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
+   Identifier_internal : BYTE ;	//set up automatically
+   Byte0 : BYTE ;	
+   Byte1 : BYTE ;	
+   ZSW2 : STRUCT 	
+    Bit_08 : BOOL ;	//Vdc > P2172
+    Bit_09 : BOOL ;	//Ramp-up/down completed
+    Bit_10 : BOOL ;	//Technology controller output at lower limit
+    Bit_11 : BOOL ;	//Technology controller output at upper limit
+    Bit_12 : BOOL ;	//N/U
+    Bit_13 : BOOL ;	//N/U
+    Bit_14 : BOOL ;	//N/U
+    Bit_15 : BOOL ;	//N/U
+    Bit_00 : BOOL ;	//DC braking active
+    Bit_01 : BOOL ;	//n_act > P1228 (n_standstill)
+    Bit_02 : BOOL ;	//n_act > P1080 (n_min)
+    Bit_03 : BOOL ;	//I_act >= P2170
+    Bit_04 : BOOL ;	//n_act > P2155
+    Bit_05 : BOOL ;	//n_act <= P2155
+    Bit_06 : BOOL ;	//n_act >= r1119 (n_ref)
+    Bit_07 : BOOL ;	//Vdc <= P2172
+   END_STRUCT ;	
+  END_STRUCT ;	
+  PCD_receive : STRUCT 	//Free
+   No_set_act_val_deviation : BOOL ;	//8: 1=No Istwert/Sollwert deviation
+   Control : BOOL ;	//9: 1=Master control requested
+   f_reached : BOOL ;	//10: 1=Output freq/speed >= max freq/speed
+   No_motor_current_limit : BOOL ;	//11: 0=Motor at current limit
+   No_motor_holding_brake : BOOL ;	//12: 0=No holding brake
+   No_motor_overload : BOOL ;	//13: 0=Motor overload
+   Motor_runs_right : BOOL ;	//14: 0=CCW; 1=CW
+   No_inverter_overload : BOOL ;	//15: 0=Inverter overload
+   Drive_ready : BOOL ;	//0: 1=Ready for ON
+   Drive_ready_to_run : BOOL ;	//1: 1=Ready to run
+   Drive_running : BOOL ;	//2: 1=Operation enabled
+   Fault : BOOL ;	//3: 1=Fault active
+   OFF2_active : BOOL ;	//4: 1=OFF2 active
+   OFF3_active : BOOL ;	//5: 1=OFF3 active
+   ON_inhibit_active : BOOL ;	//6: 1=Starting lockout
+   Warning : BOOL ;	//7: 1=Alarm is active
+   Speed : INT ;	//Setpoint (0x4000 = 100% relative to P2000)
+  END_STRUCT ;	
+  PCD_send : STRUCT 	//Free
+   JOG_right : BOOL ;	//8: 1=Jog CW
+   JOG_left : BOOL ;	//9: 1=JOg CCW
+   Control_from_PLC : BOOL  := TRUE;	//10: 1=DP master supplies valid setpoints
+   Reverse : BOOL ;	//11: 1=Reverse rotation (CCW on positive setpoint)
+   Bit12 : BOOL ;	//12: Not used
+   DDS_Bit_0 : BOOL ;	//13: DDS bit 0 (was MOP up)
+   DDS_Bit_1 : BOOL ;	//14: DDS bit 1 (was MOP down)
+   CDS_Bit_0 : BOOL ;	//15: CDS bit 0
+   OFF1 : BOOL ;	//0: 1=Set inverter 'ready to run'; 0=RFG ramp down (must transition 0->1)
+   OFF2 : BOOL ;	//1: 0=Remove pulses, coast to stop
+   OFF3 : BOOL ;	//2: 0=Ramp down along RFG (P1135)
+   RUN_enable : BOOL  := TRUE;	//3: 1=Closed-loop control + pulses are enabled
+   Operating_condition : BOOL  := TRUE;	//4: 1=Operating condition; 0=Disable RFG, drive remains on
+   RFG_enable : BOOL  := TRUE;	//5: 1=Enable RFG; 0=Freeze RFG setpoint
+   Setpoint_enable : BOOL  := TRUE;	//6: 0=Setpoint disabled, RFG input 0; 1=Setpoint at RFG enabled
+   Fault_acknowledge : BOOL ;	//7: 1=Acknowledge faults
+   Main_setpoint : INT ;	//Speed setpoint, 0x4000 = 100% (relative to P2000)
+  END_STRUCT ;	
+  PKW : STRUCT 	//Free
+   RECEIVE : STRUCT 	
+    Identifier_Nr : WORD ;	
+    Index : INT ;	
+    Value : DINT ;	
+   END_STRUCT ;	
+   SEND : STRUCT 	
+    Identifier_Nr : WORD ;	
+    Index : INT ;	
+    Value : DINT ;	
+   END_STRUCT ;	
+  END_STRUCT ;	
+  Intern : STRUCT 	//Free
+   P_Job : DWORD ;	
+   Offset_value : WORD ;	//Pointer offset
+   Index_counter : INT ;	//[0..] points at subparameter in work
+   Job_counter : INT ;	//Job counter [0..15] Points at job in work
+   Job_P_BITS : DWORD ;	//Actual pointer
+   Watch_Dog_write : INT ;	//[0..50] cycles counter
+   Parameter_Nr_actual : INT ;	//actual transfered parameter
+   Fault_DP_SFC14_15 : INT ;	
+   Job_an : BOOL ;	
+   Job_end : BOOL ;	//at the end of the end of the job 0 will be sent to DP
+   DP_fault : BOOL ;	
+   F_Reset_Internal : BOOL ;	
+   Spare : BOOL ;	
+   err : BOOL ;	//Fault
+   Fault_DP_PCD_access : BOOL ;	
+   Trans_Para : STRUCT 	
+    Spare : INT ;	
+    Stop_fault_estimation : BOOL ;	
+    Spare_0 : BOOL ;	
+    Spare_1 : BOOL ;	
+    Spare_11 : DWORD ;	
+    Spare_2 : INT ;	
+   END_STRUCT ;	
+  END_STRUCT ;	
+  Enable : BOOL ;	//Drive enable signal (OFF1/OFF2)
+  Drive_ready : BOOL ;	//Drive is not running but ready to run
+  Drive_STOP : BOOL ;	//Drive is in standstill
+  Motor_Right : BOOL ;	//Drive running right 
+  Motor_Left : BOOL ;	//Drive running left
+  Commission : STRUCT 	
+   Internal_error : BOOL ;	//Not used
+   Spare2 : BOOL ;	//Not used
+   Spare3 : BOOL ;	//Not used
+   Spare4 : BOOL ;	//Not used
+   Spare5 : BOOL ;	//Not used
+   Spare6 : BOOL ;	//Not used
+   Sinamics : BOOL ;	//Drive type recognized as Sinamics series
+   Micromaster : BOOL ;	//Drive type recognized as Micromaster series
+   Spare01 : INT ;	//Not used
+   Spare02 : INT ;	//Not used
+  END_STRUCT ;	
+  Config : STRUCT 	//Custom read/write
+   Parameter_nr : INT ;	//User-supplied parameter nbr for read/write
+   Parameter_index : INT ;	//User-supplied index for parameter
+   Value_new : DWORD ;	//User-supplied new value (DINT or REAL)
+   Value : DWORD ;	//Actual value for supplied parameter/index
+   Write_new : BOOL ;	//User sets when writing new value, PLC clears when done
+  END_STRUCT ;	
+  DDS : STRUCT 	//Drive Data Set processing
+   Nr : INT ;	//User-supplied desired Drive Data Set nbr
+   OK : BOOL ;	//Selected DDS = Active DDS
+   Parm_valid : BOOL ;	//P0280/P0281 configured properly
+   Nr_valid : BOOL ;	//Drive actual DDS in use
+   Max_nr : INT ;	//Max DDS nbr supported by drive (requires P180 for Sinamics)
+  END_STRUCT ;	
+END_VAR
+VAR_TEMP
+  Page_Sel_0 : BOOL ;	//1: Parameter Nr > 1999
+  P_Address : WORD ;	//Peripheral address for SFC14/15
+  P_Job_bits : DWORD ;	//JOb processing
+  Job_fault_NR : WORD ;	//Request fault number
+  Job_bit_field : DWORD ;	//Job processing
+  Job_identifier : WORD ;	//Job processing
+  PCD_Address : DWORD ;	//Address as pointer
+  DDS0_Parm : DINT ;	
+  DDS0_Bit : DINT ;	
+  DDS1_Parm : DINT ;	
+  DDS1_Bit : DINT ;	
+  TmpDint : DINT ;	
+END_VAR
+BEGIN
+NETWORK
+TITLE =Version history
+//v 3.00 01Aug20/STP
+//        - Added job 11 r2131 (fault) and job 12 r2132 (warning) for Sinamics
+//          drives to compensate for a firmware bug where the drive gets stuck on
+//          the diag display and warnings do not auto clear. Siemens is aware.
+//        - Removed Micromaster commissioning code, freeing up several parameter
+//          jobs.
+//        - Enabled the use of drive data set 4 for Sinamics.
+//v 2.15 22Jan20/STP
+//        - Added job 26 r0024 actual motor frequency and send this value to
+//          the interface output as opposed to the calculated value. Value in Hz
+//          for both MicroMaster and Sinamics.
+//        - Added/corrected tag comments.
+//        - Corrected MM drive detection (used >= and <= instead of > and <). 
+//        - Moved internal error flag to commissioning structure.
+//        - Requires regenerating instance data block.
+//v 2.14 06May19/STP
+//        - Bug fix: job 25 index was incorrectly set to 1.
+//        - Modified drive detection.
+//v 2.13 25Jan19/STP
+//        - Automatically detect MM420/440 or Sinamics G120 for DDS
+//          switching. With MM4, read active DDS from r51 (default). With
+//          G120, read from r837.
+//          Write appropriate parameter number to Job_25.Parameter_Nr
+// v 2.12 24Sep18/STP
+//        - Convert #Speed to ABS value.
+//        - DDS selection using P820=r2090.13; P821=r2090.14
+//        - DDS selection now works for Sinamics drives as well.
+//        - Send speed setpoint unconditionally.
+// v 2.11 01Aug18/STP
+//        - DP error code 91001 exceeded INT boundary, changed to 9001.
+//          Changed all internal 1,000 codes to 9,000 as this is a range
+//          available for both MM4 as well as Sinamics.
+//        - Changed diag code output from INT to DINT for Sinamics.
+//        - The extended job bits were not cleared. Corrected in NW22 by
+//          writing DWord to #Data_fault.
+// v 2.10 11Jun18/STP
+//        - Version 2.9 introduced the problem that when switching 
+//          the custom RW job from a parameter nbr to 0 it triggered 
+//          an internal error on job 3. Worked around this by stop
+//          writing the parameter nbr to job 3 (remains at last value).
+//        - Rated motor RPM is DWORD, needs conversion to float for 
+//          #Frequency calculation.
+// v 2.09  24May18/STP
+//         - Added capability to select Drive Data Set by sending
+//           STW.12 and .15 to P0280/P0281.
+//           (Added jobs 23..25 used for this, leaving 7 jobs available.)
+//         - Properly named the jobs.
+// v 2.08  25Aug17/STP
+//         - Simplified interface.
+//         - Added 16 additional custom parameter jobs.
+//         - Removed parameter cycle timing.
+//         - Removed fault delay (will be fixed later).
+//         - Moved custom R/W job 3 interface to Config strusture.
+//         - Moved commissioning variables to separate structure.
+//         - Added optional Coast input to control OFF2.
+// v2.6.03 25Apr15/STP
+//         - Moved custom parameter to STAT area.
+//         - Moved Parm R/W bools to STAT area.
+// v2.6.02 28Oct14/STP
+//         - Moved the fault delay to the STAT area and fixed its value to 30.
+// v2.06.1 28Oct14/STP
+//         - Filter small values for torque/current.
+// v2.06  18Apr13/STP
+//         - Return absolute values for current/torque.
+// v2.05  15Jan13/STP
+//         - Fixed jobs 1/2 to read current/torque.
+//         - Transformed job 10 to custom READ job A.
+//         - Left job 3 for custom read/write as job B.
+// v2.04  10Jan13/STP
+//         - Moved several parms to STAT area.
+//         - Added OFF2 input (coast to stop).
+// -----------------------------------------------------------------
+// Fault:
+//      1 ..  999: Fault messages from MM 440
+//           9001: DP Fault
+// -----------------------------------------------------------------
+// Fault automatic commissioning 
+//           9002: Data fault in case of automatical commissioning
+//           9006: Not Siemens-inverter
+//           9007: Wrong Micromaster type 
+//           9008: Old firmware version
+//           9009: Quick commissioning blocked
+      NOP   0; 
+
+NETWORK
+TITLE =Regular job requests
+//19Sep17: (STP) Indicate which jobs are needed.
+// ----------------------------------------------------------------------------
+// Initiate jobs
+// ----------------------------------------------------------------------------
+// 1   r27   Act. filtered output current
+// 2   r80   Act. torque
+// 3*        Custom read/write
+// 5*  P14   Store mode
+//10*  P971  Copy values from RAM to EEPROM
+//13*  r2110 Last warnings
+//14*  r947  Last fault messages
+//15*  r949  Fault value
+//16*  r964  Read firmware version
+//17   r22   Actual motor RPM 
+//18   P311  Rated motor RPM
+//19   P305  Rated motor current
+//20   P2000 Reference speed
+//21   r70   Actual DC link voltage
+//22   P310  rated motor frequency
+//23   P820  DDS bit 0 source (BI)
+//24   P821  DDS bit 1 source (BI)
+//25   r51/837 Active drive data set
+//32   r53   Status word 2
+//* jobs are not processed normally
+      L     #Job_1.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_1; // Initiate job 1 actual motor current
+
+      L     #Job_2.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_2; // Initiate job 2 actual motor torque
+
+      L     #Job_4.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_4; // Initiate job
+
+      L     #Job_6.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_6; // Initiate job
+
+      L     #Job_7.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_7; // Initiate job
+
+      L     #Job_8.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_8; // Initiate job
+
+      L     #Job_10.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      A     #Commission.Sinamics; 
+      =     #Job.Req_10; // Initiate job
+
+      L     #Job_11.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      A     #Commission.Sinamics; 
+      =     #Job.Req_11_fault; // Initiate job r2131 (Sinamics only)
+
+      L     #Job_12.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      A     #Commission.Sinamics; 
+      =     #Job.Req_12_warning; // Initiate job r2132 (Sinamics only)
+
+      L     #Job_17.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_17; // Initiate job
+
+      L     #Job_18.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_18; // Initiate job
+
+      L     #Job_19.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_19; // Initiate job
+
+      L     #Job_20.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_20; // Initiate job
+
+      L     #Job_21.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_21; // Initiate job
+
+      L     #Job_22.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_22; // Initiate job
+
+      L     #Job_23.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_23; // Initiate job
+
+      L     #Job_24.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_24; // Initiate job
+
+      L     #Job_25.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_25; // Initiate job
+
+      L     #Job_26.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_26; // Initiate job
+
+      L     #Job_27.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_27; // Initiate job
+
+      L     #Job_28.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_28; // Initiate job
+
+      L     #Job_29.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_29; // Initiate job
+
+      L     #Job_30.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_30; // Initiate job
+
+      L     #Job_31.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_31; // Initiate job
+
+      L     #Job_32.Parameter_Nr; 
+      L     0; 
+      >I    ; 
+      =     #Job.Req_32; // Initiate job
+
+NETWORK
+TITLE =Job 3 custom R/W: Prepare
+//The custom R/W was modified. After having extended the jobs from 16 to 32, the 
+//custom R/W job triggered an internal error when the requested parameter became 
+//0. IN order to work around this, we simply stop returning the parameter value, 
+//without actually changing job 3 (so it maintains the parameter number, but 
+//stops requesting it).
+      A(    ; 
+      A(    ; 
+      L     L#0; 
+      T     #Config.Value; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+      A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Config.Parameter_nr; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      JNB   _001; 
+      L     #Config.Parameter_nr; 
+      T     #Job_3.Parameter_Nr; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_001: A     BR; 
+      )     ; 
+      JNB   _002; 
+      L     #Config.Parameter_index; 
+      T     #Job_3.Index; 
+_002: NOP   0; 
+NETWORK
+TITLE =Job 3 custom R/W: Request current value
+
+      AN    #Job.Req_3; 
+      AN    #Config.Write_new; 
+      A(    ; 
+      L     #Config.Parameter_nr; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      JNB   _003; 
+      L     W#16#1; 
+      T     #Job_3.Identifier; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_003: A     BR; 
+      S     #Job.Req_3; 
+NETWORK
+TITLE =Job 3 custom R/W: Write new value
+
+      A(    ; 
+      AN    #Job.Req_3; 
+      A     #Config.Write_new; 
+      A(    ; 
+      L     #Config.Parameter_nr; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      JNB   _004; 
+      L     W#16#2; 
+      T     #Job_3.Identifier; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_004: A     BR; 
+      )     ; 
+      JNB   _005; 
+      L     #Config.Value_new; 
+      T     #Job_3.Value; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_005: A     BR; 
+      S     #Job.Req_3; 
+      R     #Config.Write_new; 
+NETWORK
+TITLE =Job 3 custom R/W: Copy returned value
+
+      AN    #Data_fault.JOB.Req_3; 
+      A(    ; 
+      L     #Config.Parameter_nr; 
+      L     0; 
+      >I    ; 
+      )     ; 
+      JNB   _006; 
+      L     #Job_3.Value; 
+      T     #Config.Value; 
+_006: NOP   0; 
+NETWORK
+TITLE =Execute peripheral read with SFC14
+//Read Zustandswort 1 and Hauptistwert and store in the structure #PCD_receive.
+      L     #ADDRESS; // Convert address to pointer
+      T     #P_Address; 
+      SLD   3; 
+      T     #PCD_Address; 
+      LAR1  ; 
+      L     PID [AR1,P#8.0]; // Read ZSW1 & HIW word from peripheral (2 words)
+      LAR1  P##PCD_receive; 
+      T     DID [AR1,P#0.0]; // Store in #PCD_receive
+      L     0; 
+      ==D   ; 
+      JC    Ne0a; 
+
+      L     #Intern.Fault_DP_SFC14_15; 
+      ==I   ; 
+      AN    #Intern.Job_an; 
+      JC    FE0; 
+
+Ne0a: CALL SFC   14 (// Read parameter data
+           LADDR                    := #P_Address,
+           RET_VAL                  := #Intern.Fault_DP_SFC14_15,
+           RECORD                   := #PKW.RECEIVE);
+
+
+NETWORK
+TITLE =Fault
+//Due to a firmware bug known to Siemens, Sinamics drives can get stuck on the 
+//diagnostics display (IOP2). The warnings then do not auto clear and get written 
+//to the diagnostics code.
+//
+//To be clear, r2110 is still very much valid for Sinamics, but the warnings 
+//should auto clear, and they don't. Instead we wil read r2132 instead.
+// Micromaster: check job 13, Sinamics: check job 12 for active warning code
+FE0:  L     #Job_13.Last_warning_1; // By default, read job 13
+      AN    #Commission.Sinamics; 
+      JC    _00d; 
+      L     #Job_12.Act_warning; // For Sinamics, read job 12
+_00d: L     L#0; 
+      <>D   ; 
+      O     #PCD_receive.Warning; // .. or ZSW1.7 Warning
+      =     #Warning; 
+      =     #Job.Req_13_warnings; // Trigger job 13
+
+      L     #Intern.Fault_DP_SFC14_15; // The drive reads returned an error
+      L     0; 
+      <>I   ; 
+      =     #Intern.Fault_DP_PCD_access; 
+
+      A     #Intern.Fault_DP_PCD_access; // Set the internal fault bit
+      AN    #Intern.Trans_Para.Stop_fault_estimation; 
+      S     #Intern.DP_fault; 
+
+      A     #Intern.Fault_DP_PCD_access; 
+      A     #Intern.Trans_Para.Stop_fault_estimation; 
+      JC    AN0; 
+
+      A     #Intern.DP_fault; // Write internal error and record DP fault
+      S     #Intern.err; 
+      JCN   Fe0b; 
+
+      L     L#9001; // #Intern.Fehler_DP_SFC14_15 was:1001
+      T     #Job_14.Last_fault_1; 
+      L     0; 
+      T     #Job_14.Last_fault_2; 
+
+      L     0; 
+      L     #Intern.Fault_DP_SFC14_15; 
+      ==I   ; 
+      JC    Fe0d; 
+
+      L     #Intern.Fault_DP_SFC14_15; 
+      T     #Data_fault.DP_Add_info; 
+
+      JU    Fe0d; 
+
+Fe0b: L     #Job_14.Last_fault_1; 
+      L     0; 
+      <>I   ; 
+      O(    ; 
+      L     #Job_15.Last_fault_values_1; 
+      <>I   ; 
+      )     ; 
+      O     #PCD_receive.Fault; 
+      S     #Job.Req_14_faults; 
+      S     #Job.Req_15_Faults; 
+
+      A     #PCD_receive.Fault; 
+      S     #Intern.err; 
+
+Fe0d: O     #RESET; 
+      O     #Intern.F_Reset_Internal; 
+      =     #PCD_send.Fault_acknowledge; 
+      JCN   AN0; 
+
+      R     #Intern.F_Reset_Internal; 
+      S     #Job.Req_14_faults; 
+      S     #Job.Req_15_Faults; 
+      S     #Job.Req_16_Firmware; 
+      R     #Intern.DP_fault; 
+      R     #Intern.err; 
+      R     #Intern.Trans_Para.Stop_fault_estimation; 
+      R     #Intern.Spare; 
+
+      L     0; 
+      T     #Intern.Trans_Para.Spare; 
+
+AN0:  NOP   0; 
+
+// ----------------------------------------------------------------------------
+// Fault status to interface
+// ----------------------------------------------------------------------------
+
+      A     #Intern.err; 
+      =     #Fault; 
+
+NETWORK
+TITLE =SET UP DRIVE FOR START
+//*** ADDED BY STP ***
+//
+//Set up the enable signal internal to the FB. We need an external run permissive 
+//and a valid speed setpoint.
+//
+//The documentation states that with 0% setpoint with the enable signal ON the 
+//drive is stationary and could cause the motor temp to rise.
+//
+//Starting drive:
+//   * Set OFF3 = 1 (if not required, assign '1' permanently)
+//   * #Drive_ready must be 1 after:
+//        # Drive is stationary
+//        # #PCD_send.OFF2=1 (no active OFF2 stop)
+//        # #PCD_send.OFF3=1 (no active OFF3 stop)
+//        # No fault/no error
+//        # #Enable=0
+//        # Not switching Drive Data Sets
+//   * Enter a valid speed setpoint.
+//   * Set #Enable=1
+//
+//10Jan13: (STP) Added OFF2 since it is now also used as input.
+//24May18: (STP) Interrupt enable signal while switching data sets.
+      A(    ; 
+      L     #Setpoint; 
+      L     0; 
+      <>I   ; 
+      )     ; 
+      A     #Run; 
+      A     #PCD_send.OFF2; 
+      A     #PCD_send.OFF3; 
+      AN    #Fault; 
+      A(    ; 
+      AN    #Running; 
+      AN    #Enable; 
+      O     #Enable; 
+      )     ; 
+      A     #DDS.OK; 
+      =     #Enable; 
+NETWORK
+TITLE =Control - OFF1
+//Control Word = Steuerwort
+//Priority sequence: OFF2, OFF3, OFF1.
+//
+//OFF1:
+// - Valid start conditions (ENABLE).
+// - Drive reported OFF2 on.
+//
+//STW bits:
+// 0 : 1 = Sets inverter to 'ready to run' state.
+//     0 = ramp down along RFG, pulses disabled once f < f_min
+// 1 : 0 = instanteneous pulse removal, drive coasts to stop
+// 2 : 0 = rapid stop along RFG (P1135)
+// 3 : 1 = closed-loop control + pulses enabled
+// 4 : 0 = disable RFG, inverter remains in on state
+// 5 : 1 = enable RFG
+//     0 = currently setpoint by RFG is frozen
+// 6 : 0 = disable setpoint, value selected at RFG input is set to 0
+//     1 = enable setpoint, value selected at RFG input is activated
+// 7 : 1 = fault acknowledge
+// 8 : 1 = CW inching
+// 9 : 1 = CCW inching
+//10 : 1 = setpoints valid, master transfers valid setpoints
+//     0 = setpoints invalid
+//11 : 1 = setpoint is inverted, motor rotates CCW with positive setpoint
+//     0 = setpoint not inverted, motor rotates CW with positive setpoint
+//12 : not used
+//13 : 1 = motorized potentiometer up
+//14 : 1 = motorized potentiometer down
+//15 : 0 = remote control
+//     1 = local control active (BOP/AOP)
+// ----------------------------------------------------------------------------
+// OFF1
+// ----------------------------------------------------------------------------
+//
+// OFF1 must transition from 0 to 1 to start
+// OFF2 must be enabled prior, so wait until drive confirmed OFF2
+      A     #Enable; // Valid start conditions
+      A     #PCD_receive.OFF2_active; // Drive reported OFF2 on
+      =     #PCD_send.OFF1; // Motor ident is running
+NETWORK
+TITLE =Control - OFF2
+//10Jan13: (STP) Added OFF2 option. This signal is active low. When coasting is 
+//required it can be made the same as the OFF1 input since it has priority.
+//
+//Priority sequence: OFF2, OFF3, OFF1.
+//
+//Set OFF2:
+// - Coast option is not needed (if not needed always send '1').
+// or 
+// - Coast option is needed:
+// - Valid start conditions (ENABLE).
+// or
+// - Keep on when stopped or we could never start.
+//
+// ----------------------------------------------------------------------------
+// OFF2 - Coast stop
+// ----------------------------------------------------------------------------
+//
+// This signal must be '1' before OFF1 is enabled.
+      ON    #Coast; // Coast option off
+      O     ; 
+      A     #Coast; // Coast option on:
+      A     #Enable; // ..valid start conditions
+      ON    #Running; // Motor ident is running
+      =     #PCD_send.OFF2; // Keep on when stopped
+NETWORK
+TITLE =Control - OFF3
+//Priority sequence: OFF2, OFF3, OFF1.
+//
+//OFF3:
+// - Keep always on for now.
+// - If needed, could slave to E-Stop (then also enable during drive ident).
+      SET   ; 
+      =     #PCD_send.OFF3; // Quick STOP
+
+NETWORK
+TITLE =Send speed setpoint %
+//Speed setpoint = Hauptsollwert HSW
+//
+//*** MODIFIED BY STP ***
+//
+//01Oct18: (STP) v2.12 - Send speed setpoint unconditioally. It is a nice 
+//troubleshooting tool, the drive no longer reads INHIBIT in standstill.
+// ----------------------------------------------------------------------------
+// Scale the setpoint for the inverter
+// ----------------------------------------------------------------------------
+//
+// 0x4000 = 16384 = 100% = P2000 value
+// Regardless of the entered rated motor data, P2000 determines the scaling
+// THe Micromaster uses frequency (Hz), the Sinamics uses speed (1/min).
+      L     #Setpoint; // Limit the upper limit to 0x7FFF (32767)
+      L     199; 
+      <=I   ; 
+      JC    _07a; 
+      L     32767; // ..load max, write value
+      JU    _07w; 
+
+_07a: L     #Setpoint; // Limit the lower limit to 0x8001 (-32767)
+      L     -199; 
+      >=I   ; 
+      JC    _07b; 
+      L     -32767; // ..load min, write value
+      JU    _07w; 
+
+_07b: L     #Setpoint; // Scale desired setpoint
+      ITD   ; 
+      DTR   ; 
+      L     1.638400e+002; // Scale to 0x4000=16384=100%=P2000
+      *R    ; 
+      RND   ; 
+_07w: T     #PCD_send.Main_setpoint; // Setpoint sent to drive
+
+NETWORK
+TITLE =Receive actual speed %
+//Actual speed = Hauptistwert HIW
+//
+//24Sep18: (STP) v2.12: Convert speed received to absolute value.
+      L     #PCD_receive.Speed; 
+      ITD   ; 
+      DTR   ; 
+      L     1.638400e+002; // 100% corresponds HEX 4000 or INT 16384
+      /R    ; 
+      ABS   ; // Take absolute value
+      RND   ; 
+      T     #Speed; 
+NETWORK
+TITLE =Status - Drive stopped
+//ZSW (status word = Zustandwort) bits:
+//
+// 0: 1=Ready for ON: power supply on, electronics initialized, pulses disabled.
+// 1: 1=Ready to run: OFF1 on, no fault, inverter can start when 'enable 
+//      operation' is active.
+// 2: 1=Operation enabled
+// 3: 1=Fault active
+// 4: 1=OFF2 is active
+// 5: 1=OFF3 is active
+// 6: 1=Starting lockout (eg due to fault)
+// 7: 1=Alarm is active
+// 8: 1=No setpoint/actual value deviation (within tolerance range)
+// 9: 1=Master control requested; 0=Local operation
+//10: 1=f reached (output frequency/speed >= max frequency/speed
+//11: 1=Alarm: motor at current limit
+//12: 0=Motor holding brake (can be used to control brake)
+//13: 0=Motor overload
+//14: 1=CW rotation; 0=CCW rotation
+//15: 0=Inverter overload (current, temperature)
+// Indicate motor at standstill if not recieving speed from drive
+      L     0; 
+      L     #PCD_receive.Speed; 
+      ==I   ; 
+      =     #Drive_STOP; 
+
+// Indicate running
+
+
+
+
+
+
+
+// Indicate drive ready
+
+
+NETWORK
+TITLE =Status - Motor running CW
+
+      AN    #Drive_STOP; 
+      A     #PCD_receive.Motor_runs_right; 
+      =     #Motor_Right; 
+
+
+NETWORK
+TITLE =Status - Motor running CCW
+
+      AN    #Drive_STOP; 
+      AN    #PCD_receive.Motor_runs_right; 
+      =     #Motor_Left; 
+
+
+NETWORK
+TITLE =Status - Drive running
+
+      O     #Motor_Left; 
+      O     #Motor_Right; 
+      =     #Running; 
+
+
+NETWORK
+TITLE =Status - Ready
+
+      A     #PCD_receive.Drive_ready; 
+      AN    #Fault; 
+      AN    #PCD_receive.ON_inhibit_active; 
+      =     #Drive_ready; 
+NETWORK
+TITLE =Start fault acknowledgement
+//Set all fault bits und fault messages to 0
+//
+//01Aug18: (STP) Include the extended job booleans by writing Dint.
+      AN    #RESET; 
+      JC    FEE; 
+      SET   ; 
+      R     #Commission.Internal_error; 
+      LAR1  P##Data_fault; 
+      L     L#0; // Clear 32 job fault bits
+      T     DID [AR1,P#0.0]; 
+      T     #Data_fault.Nr; 
+      T     #Data_fault.DP_Add_info; 
+      T     #Data_fault.Request_Nr; 
+      T     #Data_fault.Index; 
+      T     #Data_fault.Parameter_Nr; 
+      T     #Data_fault.Fault_Commissioning; 
+FEE:  NOP   0; 
+NETWORK
+TITLE =Process parameter jobs
+
+      L     P##Job; // Load job requests
+      T     #P_Job_bits; 
+
+      A     #Intern.Job_an; // Busy
+      JC    pa3; 
+pa1:  LAR2  #P_Job_bits; 
+      L     0; 
+      L     DID [AR2,P#0.0]; 
+      ==D   ; 
+      JC    pa1f; 
+      L     #Intern.Job_counter; 
+      TAK   ; 
+      CAD   ; 
+      RRD   ; 
+      CAD   ; 
+      T     #Job_bit_field; 
+      LAR2  P##Job_bit_field; 
+      L     32; // Increased from 16
+pa1b: A     L [AR2,P#0.0]; 
+      JC    pa1c; 
+      +AR2  P#0.1; 
+      LOOP  pa1b; 
+pa1f: L     0; 
+      T     #Intern.Job_counter; 
+      SET   ; 
+      R     #Intern.Job_an; 
+      JU    pae; 
+pa1c: L     32; // Increased from 16
+      TAK   ; 
+      -I    ; 
+      L     #Intern.Job_counter; 
+      +I    ; 
+      L     32; // Increased from 16
+      <I    ; 
+      JC    pa1d; 
+      -I    ; 
+      T     #Intern.Job_counter; 
+      JU    pa1e; 
+pa1d: TAK   ; 
+pa1e: T     #Intern.Job_counter; 
+      L     #P_Job_bits; 
+      +D    ; 
+      T     #Intern.Job_P_BITS; 
+
+
+      L     #Intern.Job_counter; 
+      JL    Au1; 
+      JU    Au1; 
+      JU    Au2; 
+      JU    Au3; 
+      JU    Au4; 
+      JU    Au5; 
+      JU    Au6; 
+      JU    Au7; 
+      JU    Au8; 
+      JU    Au9; 
+      JU    Au10; 
+      JU    Au11; 
+      JU    Au12; 
+      JU    Au13; 
+      JU    Au14; 
+      JU    Au15; 
+      JU    Au16; 
+      JU    Au17; // Increased from 16
+      JU    Au18; 
+      JU    Au19; 
+      JU    Au20; 
+      JU    Au21; 
+      JU    Au22; 
+      JU    Au23; 
+      JU    Au24; 
+      JU    Au25; 
+      JU    Au26; 
+      JU    Au27; 
+      JU    Au28; 
+      JU    Au29; 
+      JU    Au30; 
+      JU    Au31; 
+      JU    Au32; 
+Au1:  LAR1  P##Job_1; 
+      JU    pa2a; 
+Au2:  LAR1  P##Job_2; 
+      JU    pa2a; 
+Au3:  LAR1  P##Job_3; 
+      JU    pa2a; 
+Au4:  LAR1  P##Job_4; 
+      JU    pa2a; 
+Au5:  LAR1  P##Job_5; 
+      JU    pa2a; 
+Au6:  LAR1  P##Job_6; 
+      JU    pa2a; 
+Au7:  LAR1  P##Job_7; 
+      JU    pa2a; 
+Au8:  LAR1  P##Job_8; 
+      JU    pa2a; 
+Au9:  LAR1  P##Job_9; 
+      JU    pa2a; 
+Au10: LAR1  P##Job_10; 
+      JU    pa2a; 
+Au11: LAR1  P##Job_11; 
+      JU    pa2a; 
+Au12: LAR1  P##Job_12; 
+      JU    pa2a; 
+Au13: LAR1  P##Job_13; 
+      JU    pa2a; 
+Au14: LAR1  P##Job_14; 
+      JU    pa2a; 
+Au15: LAR1  P##Job_15; 
+      JU    pa2a; 
+Au16: LAR1  P##Job_16; 
+      JU    pa2a; 
+Au17: LAR1  P##Job_17; // Increased from 16
+      JU    pa2a; 
+Au18: LAR1  P##Job_18; 
+      JU    pa2a; 
+Au19: LAR1  P##Job_19; 
+      JU    pa2a; 
+Au20: LAR1  P##Job_20; 
+      JU    pa2a; 
+Au21: LAR1  P##Job_21; 
+      JU    pa2a; 
+Au22: LAR1  P##Job_22; 
+      JU    pa2a; 
+Au23: LAR1  P##Job_23; 
+      JU    pa2a; 
+Au24: LAR1  P##Job_24; 
+      JU    pa2a; 
+Au25: LAR1  P##Job_25; 
+      JU    pa2a; 
+Au26: LAR1  P##Job_26; 
+      JU    pa2a; 
+Au27: LAR1  P##Job_27; 
+      JU    pa2a; 
+Au28: LAR1  P##Job_28; 
+      JU    pa2a; 
+Au29: LAR1  P##Job_29; 
+      JU    pa2a; 
+Au30: LAR1  P##Job_30; 
+      JU    pa2a; 
+Au31: LAR1  P##Job_31; 
+      JU    pa2a; 
+Au32: LAR1  P##Job_32; 
+pa2a: TAR1  #Intern.P_Job; 
+      A     #Intern.Fault_DP_PCD_access; 
+      JC    pa7c; 
+      L     0; 
+      T     #Intern.Index_counter; 
+      T     #Intern.Parameter_Nr_actual; 
+      L     DIB [AR1,P#4.0]; 
+      ==I   ; 
+      L     22; 
+      JC    pa7a; 
+      TAK   ; 
+      SRW   5; 
+      JP    pa2b; 
+//0: Transfer individual parameter s
+      L     DIW [AR1,P#2.0]; // Job_n_Index
+pa2b: T     #Intern.Index_counter; 
+      L     0; 
+pa2c: T     #Intern.Offset_value; 
+// 
+// Trigger transfer
+// AR 1 must point to the start of the job block
+pa21: SET   ; 
+      S     #Intern.Job_an; 
+      L     DIB [AR1,P#4.0]; // Analyze the job identifier
+      AW    W#16#F; 
+      JL    pa4g; 
+      JU    pa4g; // Job identifier 0: unknown job identifier
+      JU    pa4h; // Job identifier 1: read  
+      JU    pa4i; // Job identifier 2: write to RAM
+      JU    pa4j; // Job identifier 3: write to EEPROM
+pa4g: L     24; // Fault 24: unknown job identifier
+      JU    pa7a; 
+pa4h: L     6; // 6: read job identifier for parameter
+      JU    pa4f; 
+pa4i: L     DIB [AR1,P#5.0]; // Job_n_Identifier_internal:   job identifier for MM4xx
+      L     8; // Modify parameter value (Array double word)  
+      ==I   ; 
+      JC    pa4c; 
+      L     7; // Modify parameter value (Array)
+      JU    pa4f; 
+pa4j: L     DIB [AR1,P#5.0]; // Job_n_Identifier_internal:   job identifier for MM4xx
+      L     12; // Modify parameter value (Array word) and save in EEPROM 
+      ==I   ; 
+      JC    pa4c; 
+      L     11; // Modify parameter value (Array word) and save in EEPROM
+pa4f: T     DIB [AR1,P#5.0]; // Job_n_Identifier_internal:   job identifier for MM4xx
+pa4c: L     2000; // Parameter 2000   (Parameter page 1: Parameter 0 to 1999)
+      L     DIW [AR1,P#0.0]; // Job_n_Parameter-Nr
+      T     #Intern.Parameter_Nr_actual; 
+      >I    ; 
+      =     #Page_Sel_0; 
+      JC    pa4a; // if Parameter Nr < 2000
+      TAK   ; 
+      -I    ; 
+pa4a: L     DIB [AR1,P#5.0]; // Job_n_Identifier_internal:   job identifier for MM4xx
+      SLW   12; 
+      OW    ; 
+      T     #PKW.SEND.Identifier_Nr; 
+
+      L     #Intern.Index_counter; // Job_n_Index (Subparameter Nr)
+      SLW   8; 
+      A     #Page_Sel_0; 
+      JC    pa4b; 
+      OW    W#16#80; // Parameter > 1999 choose
+pa4b: T     #PKW.SEND.Index; 
+      L     0; 
+      T     #Intern.Watch_Dog_write; 
+      L     DIB [AR1,P#4.0]; 
+      AW    W#16#F; 
+      L     1; 
+      ==I   ; 
+      JC    pae; 
+
+      L     #Intern.Offset_value; 
+      +AR1  ; 
+      L     DID [AR1,P#6.0]; // Job_n_Value
+      T     #PKW.SEND.Value; 
+      JU    pae; 
+// 
+// Control request end
+pa3:  LAR1  #Intern.P_Job; 
+      A     #Intern.Fault_DP_PCD_access; 
+      JC    pa7c; 
+      L     #PKW.RECEIVE.Identifier_Nr; 
+      SLW   4; // Bit 12 to 15
+      L     #PKW.SEND.Identifier_Nr; 
+      SLW   4; // Bit 12 to 15
+      <>I   ; 
+      JC    pa3d; // if request running
+      L     #PKW.RECEIVE.Index; 
+      L     #PKW.SEND.Index; //equal Nr 
+      <>I   ; 
+      JC    pa3d; // if request running
+      L     7; // Response identifier: request is not possible
+      L     #PKW.RECEIVE.Identifier_Nr; 
+      SRW   12; // Isolate response identifier
+      <=I   ; 
+      JC    pa7; // if 7: Fault or 8: no priority for PKW interface
+
+      L     DIB [AR1,P#4.0]; 
+      AW    W#16#F; 
+      L     1; 
+      ==I   ; 
+      JC    pa3a; 
+      L     #PKW.SEND.Value; 
+      L     #PKW.RECEIVE.Value; 
+      ==I   ; 
+      JC    pa3b; 
+
+pa3d: L     5000; // 1000                        
+      L     #Intern.Watch_Dog_write; 
+      +     1; 
+      T     #Intern.Watch_Dog_write; 
+      >I    ; 
+      JC    pae; 
+      L     23; 
+      JU    pa7a; 
+pa3a: L     #Intern.Offset_value; 
+      +AR1  ; 
+      L     #PKW.RECEIVE.Value; 
+      T     DID [AR1,P#6.0]; 
+      LAR1  #Intern.P_Job; 
+// Unterparameterliste bearbeiten
+pa3b: L     DIW [AR1,P#2.0]; 
+      L     #Intern.Index_counter; 
+      <=I   ; 
+      JC    pa3c; 
+      +     1; 
+      T     #Intern.Index_counter; 
+      L     #Intern.Offset_value; 
+      +     32; 
+      JU    pa2c; 
+
+pa3c: LAR2  #Intern.Job_P_BITS; 
+      R     DIX [AR2,P#0.0]; 
+      R     #Intern.Job_an; 
+      JU    pa9; 
+// Fehler bearbeiten
+pa7:  L     8; 
+      ==I   ; 
+      L     21; 
+      JC    pa7a; 
+      L     5; 
+      L     #PKW.RECEIVE.Value; 
+      <>I   ; 
+      JC    pa7a; 
+      L     DIB [AR1,P#5.0]; 
+      SRW   1; 
+      L     1; 
+      JP    pa7b; 
+      L     -1; 
+pa7b: L     DIB [AR1,P#5.0]; 
+      +I    ; 
+      T     DIB [AR1,P#5.0]; 
+      JU    pa21; 
+pa7c: L     25; 
+pa7a: T     #Job_fault_NR; 
+      LAR2  #Intern.Job_P_BITS; 
+      SET   ; 
+      R     DIX [AR2,P#0.0]; 
+      R     #Intern.Job_an; 
+      AN    #Intern.Trans_Para.Stop_fault_estimation; 
+      S     #Commission.Internal_error; 
+      L     P##Data_fault; 
+      L     #P_Job_bits; 
+      -D    ; 
+      +AR2  ; 
+      S     DIX [AR2,P#0.0]; 
+      L     0; 
+      L     #Data_fault.Nr; 
+      <>I   ; 
+      O     #Intern.Trans_Para.Stop_fault_estimation; 
+      JC    pa9; 
+      L     #Job_fault_NR; 
+      T     #Data_fault.Nr; 
+      L     #Intern.Index_counter; 
+      T     #Data_fault.Index; 
+      L     #Intern.Parameter_Nr_actual; 
+      T     #Data_fault.Parameter_Nr; 
+      L     #Intern.Fault_DP_SFC14_15; 
+      T     #Data_fault.DP_Add_info; 
+      L     #Intern.Job_counter; 
+      +     1; 
+      T     #Data_fault.Request_Nr; 
+// end of response
+pa9:  L     0; 
+      T     #PKW.SEND.Value; 
+      T     #PKW.SEND.Identifier_Nr; 
+      T     #PKW.SEND.Index; 
+      S     #Intern.Job_end; 
+      JU    pa1; 
+pae:  NOP   0; 
+NETWORK
+TITLE =Drive Data Set selection
+//*** ADDED BY STP ***
+//
+//01Oct18: (STP) Sinamics drives return data in different format. Properly 
+//extract parameter and bit number. Changed booleans, as STW1.15 is no longer not 
+//mapped for Sinamics drives as it was for MM4.
+//
+// The VFD must have been configured specifically for the use with different
+// Drive Data Sets. We use two unused booleans in Control Word 1 (STW1):
+// bit 13 (unused) and bit 14 (motorized potentiometer up/down).
+//
+// P820/821 format: PPPP-XXBB
+//                  PPPP = higher order word with parameter number
+//                  XX   = MM4: always 0; Sinamics: always 0xFC
+//                  BB   = lower byte of lower order word containing bit number
+// P0820 should be r2090.13 and P821 should be r2090.14
+//
+//    P0821        P0821
+//    DDS bit 1    DDS bit 0    DDS#
+//    ---------    ---------    -----
+//        0            0        Drive Data Set 0
+//        0            1        Drive Data Set 1
+//        1            0        Drive Data Set 2
+//    The changeover may take >=50 ms <=2500 ms
+//
+// Micromaster 4: check actual DDS wih r0051.1 and r0051.0
+//   r0051.0   =    Selected DDS
+//   r0051.1   =    Active DDS
+// Sinamics: check actual DDS via r0837.1 and r837.0
+// The instance data is preset for MM4, so for Sinmics, the value needs to
+// be written before calling this FB:
+//      L     837
+//      T     DBx.Job_25.Parameter_Nr
+//      L     0
+//      T     DBx.Job_25.Index
+//
+// Drive Data Sets can be changed while running but not all parameters
+// will switch (i.e. ramp times will, motor parameters will not). Only
+// once the drive is not running with "drive ready" active, will all
+// parameters switch.
+//
+// *** Important ***
+// Several jobs are preconfigured here to retrieve motor configuration data,
+// like rated current, rated RPM, etc. When switching DDS, the index for these
+// parameters should reflect the active DDS.
+//
+// *** Important ***
+// When changing the drive parameters for ramp times, ensure that the changes
+// are made for all relevant Drive Data Sets, not just the default 0.
+//
+// 
+//-------------------------------------------------------------------------------
+//--------
+//
+// Extract P0820 and P0821
+//   Upper 16 bits represent parameter value
+//   Lowest 8 bits represent the bit number
+//
+////   1001 = MicroMaster 420
+////   1002 = MicroMaster 440
+////   1003 = Micro/combiMaster 411
+////   1004 = MicroMaster 410
+////   1005 = <reserved>
+////   1006 = MicroMaster 440 Px
+////   1007 = MicroMaster 430
+////    5700 --> Sinamics G120 Cu230P-2_DP
+////    5701 --> Sinamics G120 Cu230P-2_PN
+////    5702 --> Sinamics G120 Cu230P-2_CAN
+////    5703 --> Sinamics G120 Cu230P-2_HVAC
+////    5705 --> Sinamics G120 Cu230P-2_BT
+////    6100 --> SINAMICS G120 CU240B-2_DP    
+////    6103 --> SINAMICS G120 CU240B-2       
+////    6210 --> SINAMICS G120 CU240E-2_DP    
+////    6211 --> SINAMICS G120 CU240E-2_PN    
+////    6213 --> SINAMICS G120 CU240E-2       
+////    6220 --> SINAMICS G120 CU240E-2_DP_F  
+////    6221 --> SINAMICS G120 CU240E-2_PN_F  
+////    6223 --> SINAMICS G120 CU240E-2_F     
+////    6363 --> SINAMICS G120 CU250S-2 VECTOR
+////    6360 --> SINAMICS G120 CU250S-2_DP VECTOR
+////    6361 --> SINAMICS G120 CU250S-2_PN VECTOR
+////    6362 --> SINAMICS G120 CU250S-2_CAN VECTOR
+//
+// ----------------------------------------------------------------------
+// Determine drive model
+// ----------------------------------------------------------------------
+
+      A(    ; 
+      L     #Job_16.Firm; 
+      L     L#42; 
+      ==D   ; 
+      )     ; 
+      A(    ; 
+      L     #Job_16.Type_1; 
+      L     1001; 
+      >I    ; 
+      )     ; 
+      A(    ; 
+      L     #Job_16.Type_1; 
+      L     1007; 
+      <I    ; 
+      )     ; 
+      =     #Commission.Micromaster; // Drive model Micromaster
+
+      A(    ; 
+      L     #Job_16.Firm; 
+      L     L#42; 
+      ==D   ; 
+      )     ; 
+      A(    ; 
+      L     #Job_16.Type_1; 
+      L     5700; 
+      >=I   ; 
+      )     ; 
+      =     #Commission.Sinamics; // Drive model Sinamics
+
+
+// ----------------------------------------------------------------------
+// Load drive-specific data
+// ----------------------------------------------------------------------
+
+      A     #Commission.Micromaster; 
+      JCN   _007; 
+
+      L     51; // Micromaster: read active DDS from r51
+      T     #Job_25.Parameter_Nr; 
+
+      L     2; // Supported: DDS 0..2
+      T     #DDS.Max_nr; 
+
+_007: A     #Commission.Sinamics; 
+      JCN   _008; 
+
+      L     837; // Sinamics: read active DDS from r837
+      T     #Job_25.Parameter_Nr; 
+
+      L     3; // Supported: DDS 0..3
+      T     #DDS.Max_nr; 
+
+_008: NOP   0; 
+
+
+// ----------------------------------------------------------------------
+// Read DDS0/1 BI parameter bit
+// ----------------------------------------------------------------------
+
+      L     #Job_23.Value; // Read P0820 value for DDS bit 0
+      SRD   16; // Extract higher order word: 0xPPPPxxBB (P=Parm; B=bit)
+      T     #DDS0_Parm; 
+
+      L     #Job_23.Value; 
+      AD    DW#16#FF; // Extract lowest byte: 0xPPPPxxBB (P=Parm; B=bit)
+      T     #DDS0_Bit; 
+
+      L     #Job_24.Value; // Read P0821 value for DDS bit 1
+      SRD   16; // Extract higher order word: 0xPPPPxxBB (P=Parm; B=bit)
+      T     #DDS1_Parm; 
+
+      L     #Job_24.Value; 
+      AD    DW#16#FF; // Extract lowest byte: 0xPPPPxxBB (P=Parm; B=bit)
+      T     #DDS1_Bit; 
+
+
+// Indicate that P0820 and P0821 have been configured properly to allow DDS switching
+
+      A(    ; 
+      L     #DDS0_Parm; 
+      L     L#2090; 
+      ==D   ; 
+      )     ; 
+      A(    ; 
+      L     #DDS0_Bit; 
+      L     L#13; 
+      ==D   ; 
+      )     ; 
+      A(    ; 
+      L     #DDS1_Parm; 
+      L     L#2090; 
+      ==D   ; 
+      )     ; 
+      A(    ; 
+      L     #DDS1_Bit; 
+      L     L#14; 
+      ==D   ; 
+      )     ; 
+      =     #DDS.Parm_valid; // Drive parameter configuration valid
+
+
+
+// Verify the supplied DDS nbr is valid (important when checking if the
+// active DDS matches the requested DDS.
+// MM4: always supports 0..3; Sinamics: in QC, set P180 to 3 (for 0..2)
+
+      A(    ; 
+      L     #DDS.Nr; 
+      L     0; 
+      >=I   ; 
+      )     ; 
+      A(    ; 
+      L     #DDS.Nr; 
+      L     #DDS.Max_nr; 
+      <=I   ; 
+      )     ; 
+      =     #DDS.Nr_valid; 
+
+
+// DDS 0 requested, STW1.13 = 0; STW1.14 = 0
+
+      L     #DDS.Nr; // Desired DDS = 0
+      L     0; 
+      ==I   ; 
+      A     #Drive_STOP; 
+      A     #DDS.Parm_valid; // P0820/0821 configured properly
+      R     #PCD_send.DDS_Bit_0; // Load DDS0/1 values
+      R     #PCD_send.DDS_Bit_1; 
+
+
+// DDS 1 requested, STW1.13 = 1; STW1.14 = 0
+
+      L     #DDS.Nr; // Desired DDS = 1
+      L     1; 
+      ==I   ; 
+      A     #Drive_STOP; 
+      A     #DDS.Parm_valid; // P0820/0821 configured properly
+      S     #PCD_send.DDS_Bit_0; // Load DDS0/1 values
+      R     #PCD_send.DDS_Bit_1; 
+
+
+// DDS 2 requested, STW1.13 = 0; STW1.14 = 1
+
+      L     #DDS.Nr; // Desired DDS = 2
+      L     2; 
+      ==I   ; 
+      A     #Drive_STOP; 
+      A     #DDS.Parm_valid; // P0820/0821 configured properly
+      R     #PCD_send.DDS_Bit_0; // Load DDS0/1 values
+      S     #PCD_send.DDS_Bit_1; 
+
+
+// DDS 3 requested, STW1.13 = 1; STW1.14 = 1
+
+      L     #DDS.Nr; // Desired DDS = 2
+      L     3; 
+      ==I   ; 
+      A     #Drive_STOP; 
+      A     #DDS.Parm_valid; // P0820/0821 configured properly
+      S     #PCD_send.DDS_Bit_0; // Load DDS0/1 values
+      S     #PCD_send.DDS_Bit_1; 
+
+
+
+// If P820/821 are configured check if the drive has switched to the
+// requested DDS. If P820/821 are not configured, ignore.
+// This is used in the drive's enable signal. Specifying an invalid DDS
+// could lead to unpredictable results so best to stop the motor.
+
+      A     #DDS.Parm_valid; // [ P820/821 configured:
+      A     #DDS.Nr_valid; // [ ..DDS nbr valid 0..2
+      A(    ; // [ ..Actual DDS = requested DDS
+      L     #Job_25.Value; // [
+      L     #DDS.Nr; // [
+      ITD   ; 
+      ==D   ; 
+      )     ; // P820/821 not configured
+      ON    #DDS.Parm_valid; 
+      =     #DDS.OK; 
+
+
+// Alter job indices to match active Drive Data Set
+// Some jobs are requesting DDS-specific data, so the parameter index must change
+// with the active Drive Data Set. Job 25 returns the active DDS as DWORD, which 
+// we copy to the job indices of several jobs.
+
+      L     #Job_25.Value; // Active DDS nbr
+      T     #Job_18.Index; // P0311: Rated motor RPM
+      T     #Job_19.Index; // P0305: Rated motor current
+      T     #Job_20.Index; // P2000: Reference frequency
+      T     #Job_22.Index; // P0305: Rated motor frequency
+
+NETWORK
+TITLE =Execute peripheral write with SFC15
+//Write Steuerwort 1 and Hauptsollwert from #PCD_send to peripheral address.
+      A     #Intern.Fault_DP_PCD_access; 
+      JC    Na0a; 
+
+      LAR1  P##PCD_send; // Load STW1 & HSW from #PCD_send (2 words)
+      L     DID [AR1,P#0.0]; 
+      LAR1  #PCD_Address; 
+      T     PQD [AR1,P#8.0]; // Write to peripheral address
+
+      AN    #Intern.Job_an; 
+      AN    #Intern.Job_end; 
+      JC    Na0v; // Originally had a BEC here
+      R     #Intern.Job_end; 
+
+Na0a: CALL SFC   15 (// Write parameter data
+           LADDR                    := #P_Address,
+           RECORD                   := #PKW.SEND,
+           RET_VAL                  := #Intern.Fault_DP_SFC14_15);
+
+Na0v: NOP   0; 
+NETWORK
+TITLE =COPY PARAMETER VALUES TO BLOCK OUTPUTS
+//*** ADDED BY STP ***
+//
+//Copy values from jobs 1..3 to block outputs.
+//
+//Could calculate actual output frequency as:
+//
+//(Job_22.Rater_motor_frequency * Speed) / 100.0
+// ----------------------------------------------------------------------------
+// Copy motor current
+// ----------------------------------------------------------------------------
+      L     0.000000e+000; 
+      T     #Current; 
+
+      A     #Data_fault.JOB.Req_1; //return 0 on data r/w error
+      JC    _14a; 
+      L     #Job_1.Motor_current; //copy value from drive
+      T     #Current; 
+
+// ----------------------------------------------------------------------------
+// Copy motor torque
+// ----------------------------------------------------------------------------
+
+_14a: L     0.000000e+000; 
+      T     #Torque; 
+
+      A     #Data_fault.JOB.Req_2; //return 0 on data r/w error
+      JC    _14b; 
+      L     #Job_2.Motor_torque; //copy value from drive
+      ABS   ; 
+      T     #Torque; 
+
+// ----------------------------------------------------------------------------
+// Copy motor RPM
+// ----------------------------------------------------------------------------
+
+_14b: L     0.000000e+000; 
+      T     #RPM; 
+
+      A     #Data_fault.JOB.Req_17; //return 0 on data r/w error
+      JC    _14c; 
+      L     #Job_17.Motor_RPM; 
+      ABS   ; 
+      T     #RPM; 
+
+// ----------------------------------------------------------------------------
+// Copy motor frequency
+// ----------------------------------------------------------------------------
+
+_14c: L     #Job_17.Motor_RPM; 
+      L     3.000000e+001; 
+      /R    ; // Divide the actual RPM by 30
+      T     #Frequency; 
+
+NETWORK
+TITLE =COPY DIAG CODE TO BLOCK OUTPUTS (Micromaster)
+//Send the alarm or fault code to WinCC for visual feedback.
+      A(    ; 
+      AN    #Commission.Sinamics; 
+      JNB   _009; 
+      L     #Job_13.Last_warning_1; 
+      T     #Diag_code; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_009: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Job_14.Last_fault_1; 
+      L     L#0; 
+      >I    ; 
+      )     ; 
+      JNB   _00a; 
+      L     #Job_14.Last_fault_1; 
+      T     #Diag_code; 
+_00a: NOP   0; 
+NETWORK
+TITLE =COPY DIAG CODE TO BLOCK OUTPUTS (Sinamics)
+//Send the alarm or fault code to WinCC for visual feedback.
+      A(    ; 
+      A     #Commission.Sinamics; 
+      JNB   _00b; 
+      L     #Job_12.Act_warning; 
+      T     #Diag_code; 
+      SET   ; 
+      SAVE  ; 
+      CLR   ; 
+_00b: A     BR; 
+      )     ; 
+      A(    ; 
+      L     #Job_11.Act_fault; 
+      L     L#0; 
+      >I    ; 
+      )     ; 
+      JNB   _00c; 
+      L     #Job_11.Act_fault; 
+      T     #Diag_code; 
+_00c: NOP   0; 
+END_FUNCTION_BLOCK
+
