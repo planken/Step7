@@ -1,13 +1,12 @@
-FUNCTION_BLOCK FB 63
+FUNCTION_BLOCK FB 98
 TITLE =Siemens VFD Micro Master 4 & Sinamics
-//KNOW_HOW_PROTECT
 //VFD control for Siemens Simovert Micro Master 4 and Sinamics drives.
 //
 //Micro Master 4: PPo 1 mode:        4 * PKW + 2 * PZD
 //Sinamics:       Telegram 353 mode: 4 * PIV + 2 * PZD
 AUTHOR : STP
 NAME : MM_SIN
-VERSION : 3.0
+VERSION : 3.1
 CODE_VERSION1
 
 
@@ -34,7 +33,7 @@ VAR
    Req_1 : BOOL ;	//r0027: actual motor current
    Req_2 : BOOL ;	//r0080: actual motor torque
    Req_3 : BOOL ;	//Custom R/W parameters
-   Req_4 : BOOL ;	//Free
+   Req_4_freq : BOOL ;	//r0024: output frequency filtered [Hz]
    Req_5 : BOOL ;	//Store mode (RAM/EEPROM)
    Req_6 : BOOL ;	//Free
    Req_7 : BOOL ;	//Free
@@ -47,7 +46,7 @@ VAR
    Req_14_faults : BOOL ;	//Display: Read last fault messages
    Req_15_Faults : BOOL ;	//Display: Read fault value (service information) 
    Req_16_Firmware : BOOL ;	//Display: Firm / Product type / Version / Date
-   Req_17 : BOOL ;	//r0022: actual motor RPM
+   Req_17_rpm : BOOL ;	//r0022: actual motor RPM
    Req_18 : BOOL ;	//P0311: rated motor RPM
    Req_19 : BOOL ;	//P0305: rated motor current
    Req_20 : BOOL ;	//P2000: reference speed
@@ -134,11 +133,11 @@ VAR
    Value_3 : DINT ;	
   END_STRUCT ;	
   Job_4 : STRUCT 	//Free
-   Parameter_Nr : INT ;	//Job 4: free
+   Parameter_Nr : INT  := 24;	//Job 4: r0024: output frequency filtered
    Index : INT ;	//Subparameter Nr
    Identifier : BYTE  := B#16#1;	//1/11:read 2/12:write to RAM 3/13:write to EEPROM
    Identifier_internal : BYTE ;	//set up automatically
-   Value : DINT ;	//0: Fest set to 0
+   Motor_freq : REAL ;	//0: Fest set to 0
   END_STRUCT ;	
   Job_5 : STRUCT 	//Free
    Parameter_Nr : INT  := 14;	//Store mode (RAM/EEPROM)
@@ -500,6 +499,8 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Version history
+//v 3.1  23Feb21/STP
+//        - Added job 4 r0024 (actual output freq) to send to interface.
 //v 3.00 01Aug20/STP
 //        - Added job 11 r2131 (fault) and job 12 r2132 (warning) for Sinamics
 //          drives to compensate for a firmware bug where the drive gets stuck on
@@ -623,7 +624,7 @@ TITLE =Regular job requests
       L     #Job_4.Parameter_Nr; 
       L     0; 
       >I    ; 
-      =     #Job.Req_4; // Initiate job
+      =     #Job.Req_4_freq; // Initiate job
 
       L     #Job_6.Parameter_Nr; 
       L     0; 
@@ -661,7 +662,7 @@ TITLE =Regular job requests
       L     #Job_17.Parameter_Nr; 
       L     0; 
       >I    ; 
-      =     #Job.Req_17; // Initiate job
+      =     #Job.Req_17_rpm; // Initiate job
 
       L     #Job_18.Parameter_Nr; 
       L     0; 
@@ -1845,14 +1846,13 @@ NETWORK
 TITLE =COPY PARAMETER VALUES TO BLOCK OUTPUTS
 //*** ADDED BY STP ***
 //
-//Copy values from jobs 1..3 to block outputs.
+//23Feb21: (STP) Needed motor f, use r0024, as previous math really depended on 
+//motor pole pairs (which was assumed, not read).
 //
-//Could calculate actual output frequency as:
-//
-//(Job_22.Rater_motor_frequency * Speed) / 100.0
 // ----------------------------------------------------------------------------
-// Copy motor current
+// Copy actual motor current
 // ----------------------------------------------------------------------------
+
       L     0.000000e+000; 
       T     #Current; 
 
@@ -1861,8 +1861,9 @@ TITLE =COPY PARAMETER VALUES TO BLOCK OUTPUTS
       L     #Job_1.Motor_current; //copy value from drive
       T     #Current; 
 
+
 // ----------------------------------------------------------------------------
-// Copy motor torque
+// Copy actual motor torque
 // ----------------------------------------------------------------------------
 
 _14a: L     0.000000e+000; 
@@ -1874,8 +1875,9 @@ _14a: L     0.000000e+000;
       ABS   ; 
       T     #Torque; 
 
+
 // ----------------------------------------------------------------------------
-// Copy motor RPM
+// Copy actual motor RPM
 // ----------------------------------------------------------------------------
 
 _14b: L     0.000000e+000; 
@@ -1887,14 +1889,21 @@ _14b: L     0.000000e+000;
       ABS   ; 
       T     #RPM; 
 
+
 // ----------------------------------------------------------------------------
-// Copy motor frequency
+// Copy actual motor frequency
 // ----------------------------------------------------------------------------
 
-_14c: L     #Job_17.Motor_RPM; 
-      L     3.000000e+001; 
-      /R    ; // Divide the actual RPM by 30
+_14c: L     0.000000e+000; 
       T     #Frequency; 
+
+      A     #Data_fault.JOB.Req_4; //return 0 on data r/w error
+      JC    _14d; 
+      L     #Job_4.Motor_freq; 
+      ABS   ; 
+      T     #Frequency; 
+
+_14d: NOP   0; 
 
 NETWORK
 TITLE =COPY DIAG CODE TO BLOCK OUTPUTS (Micromaster)
