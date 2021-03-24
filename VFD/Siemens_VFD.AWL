@@ -1,4 +1,4 @@
-FUNCTION_BLOCK "Siemens VFD v3.1"
+FUNCTION_BLOCK FB 97
 TITLE =Siemens VFD Micro Master 4 & Sinamics
 //VFD control for Siemens Simovert Micro Master 4 and Sinamics drives.
 //
@@ -851,7 +851,7 @@ TITLE =Execute peripheral read with SFC14
       AN    #Intern.Job_an; 
       JC    FE0; 
 
-Ne0a: CALL "DPRD_DAT" (// Read parameter data
+Ne0a: CALL SFC   14 (// Read parameter data
            LADDR                    := #P_Address,
            RET_VAL                  := #Intern.Fault_DP_SFC14_15,
            RECORD                   := #PKW.RECEIVE);
@@ -1836,7 +1836,7 @@ TITLE =Execute peripheral write with SFC15
       JC    Na0v; // Originally had a BEC here
       R     #Intern.Job_end; 
 
-Na0a: CALL "DPWR_DAT" (// Write parameter data
+Na0a: CALL SFC   15 (// Write parameter data
            LADDR                    := #P_Address,
            RECORD                   := #PKW.SEND,
            RET_VAL                  := #Intern.Fault_DP_SFC14_15);
