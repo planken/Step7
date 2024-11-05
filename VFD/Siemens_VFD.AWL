@@ -1,12 +1,13 @@
 FUNCTION_BLOCK FB 97
 TITLE =Siemens VFD Micro Master 4 & Sinamics
+KNOW_HOW_PROTECT
 //VFD control for Siemens Simovert Micro Master 4 and Sinamics drives.
 //
 //Micro Master 4: PPo 1 mode:        4 * PKW + 2 * PZD
 //Sinamics:       Telegram 353 mode: 4 * PIV + 2 * PZD
 AUTHOR : STP
 NAME : MM_SIN
-VERSION : 3.1
+VERSION : 3.2
 CODE_VERSION1
 
 
@@ -499,6 +500,8 @@ END_VAR
 BEGIN
 NETWORK
 TITLE =Version history
+//v 3.2  05Nov24/STP
+//        - Job 20 (f-ref) incorrectly received an index for Sinamics.
 //v 3.1  23Feb21/STP
 //        - Added job 4 r0024 (actual output freq) to send to interface.
 //v 3.00 01Aug20/STP
@@ -1097,7 +1100,7 @@ _07a: L     #Setpoint; // Limit the lower limit to 0x8001 (-32767)
 _07b: L     #Setpoint; // Scale desired setpoint
       ITD   ; 
       DTR   ; 
-      L     1.638400e+002; // Scale to 0x4000=16384=100%=P2000
+      L     1.638400e+02; // Scale to 0x4000=16384=100%=P2000
       *R    ; 
       RND   ; 
 _07w: T     #PCD_send.Main_setpoint; // Setpoint sent to drive
@@ -1110,7 +1113,7 @@ TITLE =Receive actual speed %
       L     #PCD_receive.Speed; 
       ITD   ; 
       DTR   ; 
-      L     1.638400e+002; // 100% corresponds HEX 4000 or INT 16384
+      L     1.638400e+02; // 100% corresponds HEX 4000 or INT 16384
       /R    ; 
       ABS   ; // Take absolute value
       RND   ; 
@@ -1820,6 +1823,17 @@ _008: NOP   0;
       T     #Job_20.Index; // P2000: Reference frequency
       T     #Job_22.Index; // P0305: Rated motor frequency
 
+// Micromaster: P2000 (f-ref) accepts DDS index
+// Sinamics:    P2000 (n-ref) does not accept index, so overwrite here
+
+      AN    #Commission.Sinamics; 
+      JC    N22R; 
+
+      L     0; 
+      T     #Job_20.Index; 
+
+N22R: NOP   0; 
+
 NETWORK
 TITLE =Execute peripheral write with SFC15
 //Write Steuerwort 1 and Hauptsollwert from #PCD_send to peripheral address.
@@ -1853,7 +1867,7 @@ TITLE =COPY PARAMETER VALUES TO BLOCK OUTPUTS
 // Copy actual motor current
 // ----------------------------------------------------------------------------
 
-      L     0.000000e+000; 
+      L     0.000000e+00; 
       T     #Current; 
 
       A     #Data_fault.JOB.Req_1; //return 0 on data r/w error
@@ -1866,7 +1880,7 @@ TITLE =COPY PARAMETER VALUES TO BLOCK OUTPUTS
 // Copy actual motor torque
 // ----------------------------------------------------------------------------
 
-_14a: L     0.000000e+000; 
+_14a: L     0.000000e+00; 
       T     #Torque; 
 
       A     #Data_fault.JOB.Req_2; //return 0 on data r/w error
@@ -1880,7 +1894,7 @@ _14a: L     0.000000e+000;
 // Copy actual motor RPM
 // ----------------------------------------------------------------------------
 
-_14b: L     0.000000e+000; 
+_14b: L     0.000000e+00; 
       T     #RPM; 
 
       A     #Data_fault.JOB.Req_17; //return 0 on data r/w error
@@ -1894,7 +1908,7 @@ _14b: L     0.000000e+000;
 // Copy actual motor frequency
 // ----------------------------------------------------------------------------
 
-_14c: L     0.000000e+000; 
+_14c: L     0.000000e+00; 
       T     #Frequency; 
 
       A     #Data_fault.JOB.Req_4; //return 0 on data r/w error
